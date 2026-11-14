@@ -1,0 +1,211 @@
+import Foundation
+
+public struct RegenerationOptions: Sendable, Equatable {
+    public enum PromptChoice: Sendable, Equatable {
+        /// The current global prompt, or the student's custom prompt if they have one.
+        case current
+        /// A one-off prompt used only for this regeneration (never saved).
+        case temporary(String)
+    }
+    public var prompt: PromptChoice
+    public var additionalInstructions: String
+
+    public init(prompt: PromptChoice = .current, additionalInstructions: String = "") {
+        self.prompt = prompt
+        self.additionalInstructions = additionalInstructions
+    }
+}
+
+public enum RegenerationError: Error, LocalizedError, Equatable {
+    case jobNotFound
+    case transcriptMissing
+    case versionNotFound
+    case notADraft
+    case replacementInProgress
+
+    public var errorDescription: String? {
+        switch self {
+        case .jobNotFound: return "That lesson could not be found."
+        case .transcriptMissing: return "The local transcript for this lesson is no longer available (deleted by the retention setting or manually), so the notes cannot be regenerated. Use Reprocess Anyway to transcribe the recordings again."
+        case .versionNotFound: return "That version of the notes could not be found."
+        case .notADraft: return "Only a regenerated draft can be used to replace the notes."
+        case .replacementInProgress: return "A replacement for this lesson is already waiting to be sent to the website."
+        }
+    }
+}
+
+/// Regenerating notes from the saved local transcript (no re-transcription), local version
+/// history, and queuing replacements of website notes.
+public enum NotesRegeneration {
+    static func context(for lesson: Lesson, job: Job, mapping: StudentMapping?) -> NotesRequestContext {
+        let recs = lesson.recordings(for: job)
+        let summary = recs.count > 1
+            ? "\(recs.count) recordings combined in order (\(recs.map(\.filename).joined(separator: ", ")))"
+            : (recs.first.map { "\($0.filename), \(CoreFormat.duration($0.durationSec))" } ?? "")
+        return NotesRequestContext(pupilName: lesson.pupilName, pupilContext: mapping?.context ?? "",
+                                   lessonDate: lesson.lessonDate, recordingSummary: summary)
+    }
+
+    /// Generates a complete new version of every field and stores it as a draft for review.
+    /// The saved prompts and default model are not changed.
+    @discardableResult
+    public static func regenerate(store: LibraryStore, jobId: UUID, options: RegenerationOptions, producer: NotesProducing,
+                                  now: Date = Date(), progress: @escaping @Sendable (Double, String) -> Void = { _, _ in }) async throws -> NoteVersion {
+        guard let lesson = store.lesson(containingJob: jobId), let job = lesson.jobs.first(where: { $0.id == jobId }) else { throw RegenerationError.jobNotFound }
+        guard job.hasTranscript, let transcript = store.transcript(jobId: jobId) else { throw RegenerationError.transcriptMissing }
+        let mapping = store.mapping(id: lesson.studentId)
+        let prompt: ResolvedPrompt
+        switch options.prompt {
+        case .current:
+            prompt = PromptResolver.adding(options.additionalInstructions,
+                                           to: PromptResolver.resolve(globalPrompt: store.settings.globalPrompt, mapping: mapping))
+        case .temporary(let text):
+            prompt = PromptResolver.temporary(text, additionalInstructions: options.additionalInstructions)
+        }
+        let produced = try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
+                                                       context: context(for: lesson, job: job, mapping: mapping),
+                                                       instructions: prompt.effectiveInstructions, progress: progress)
+        let extra = options.additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        let version = NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: produced.notes, model: produced.model,
+                                  effort: produced.effort, promptSource: prompt.source, promptSnapshot: prompt.effectiveInstructions,
+                                  additionalInstructions: extra.isEmpty ? nil : extra, adjustments: produced.adjustments,
+                                  baseVersion: store.job(id: jobId)?.remoteVersion)
+        store.updateJob(id: jobId, now: now) { j in
+            j.materialiseVersions()
+            j.noteVersions?.append(version)
+        }
+        return version
+    }
+
+    public static func discard(store: LibraryStore, jobId: UUID, versionId: UUID, now: Date = Date()) {
+        store.updateJob(id: jobId, now: now) { j in
+            j.materialiseVersions()
+            if let i = j.noteVersions?.firstIndex(where: { $0.id == versionId && $0.state == .draft }) { j.noteVersions?[i].state = .discarded }
+        }
+    }
+
+    public enum AcceptOutcome: Equatable, Sendable {
+        /// The note is on the website: a PATCH replacement was queued.
+        case replacementQueued
+        /// Not on the website yet: the local notes were replaced and will be submitted.
+        case replacedLocally
+    }
+
+    /// "Replace Existing Notes" for a reviewed draft. Never overwrites before George accepts.
+    @discardableResult
+    public static func accept(store: LibraryStore, jobId: UUID, versionId: UUID, now: Date = Date()) throws -> AcceptOutcome {
+        guard let job = store.job(id: jobId) else { throw RegenerationError.jobNotFound }
+        guard let draft = job.allNoteVersions.first(where: { $0.id == versionId }) else { throw RegenerationError.versionNotFound }
+        guard draft.state == .draft else { throw RegenerationError.notADraft }
+        if let r = job.replacement, r.state == .queued { throw RegenerationError.replacementInProgress }
+
+        if job.stage == .submitted && job.remoteStatus != .deleted {
+            store.updateJob(id: jobId, now: now) { j in
+                j.materialiseVersions()
+                for i in j.noteVersions!.indices where j.noteVersions![i].state == .uploading { j.noteVersions![i].state = .discarded }
+                if let i = j.noteVersions!.firstIndex(where: { $0.id == versionId }) { j.noteVersions![i].state = .uploading }
+                j.replacement = PendingReplacement(versionId: versionId, updateId: PendingReplacement.makeUpdateId(now: now),
+                                                   baseVersion: draft.baseVersion ?? j.remoteVersion, createdAt: now)
+            }
+            return .replacementQueued
+        }
+        // Not yet on the website: swap the notes in. Content changed, so any frozen payload
+        // is discarded and a new submission id is used (avoids 409 submission_conflict).
+        let settings = store.settings
+        let lesson = store.lesson(containingJob: jobId)
+        store.updateJob(id: jobId, now: now) { j in
+            j.materialiseVersions()
+            for i in j.noteVersions!.indices {
+                if j.noteVersions![i].state == .current { j.noteVersions![i].state = .superseded }
+                if j.noteVersions![i].id == versionId { j.noteVersions![i].state = .current }
+            }
+            j.notes = draft.notes
+            j.summaryModel = draft.model
+            j.reasoningEffort = draft.effort
+            j.notesAdjustments = draft.adjustments
+            if j.submissionPayload != nil {
+                j.submissionPayload = nil
+                if let lesson {
+                    let start = lesson.recordings(for: j).first?.recordedAt ?? lesson.startedAt
+                    j.submissionId = SubmissionID.make(installId: settings.installId, lessonDate: lesson.lessonDate, startedAt: start,
+                                                       timeZone: lesson.timeZone, partLetter: j.partLetter)
+                }
+            }
+        }
+        return .replacedLocally
+    }
+
+    /// Version conflict → "Replace anyway": resend against the website's current version with a NEW update_id.
+    public static func replaceAnyway(store: LibraryStore, jobId: UUID, now: Date = Date()) {
+        store.updateJob(id: jobId, now: now) { j in
+            guard var r = j.replacement, r.state == .conflict else { return }
+            r.baseVersion = r.conflictCurrentVersion
+            r.updateId = PendingReplacement.makeUpdateId(now: now)
+            r.body = nil
+            r.state = .queued
+            r.attempts = 0
+            r.nextAttemptAt = nil
+            r.firstRetryAt = nil
+            r.message = nil
+            j.replacement = r
+        }
+    }
+
+    /// Version conflict → "Keep website version": drop the queued replacement.
+    public static func keepWebsiteVersion(store: LibraryStore, jobId: UUID, now: Date = Date()) {
+        store.updateJob(id: jobId, now: now) { j in
+            guard let r = j.replacement else { return }
+            j.materialiseVersions()
+            if let i = j.noteVersions?.firstIndex(where: { $0.id == r.versionId }) { j.noteVersions?[i].state = .discarded }
+            j.replacement = nil
+        }
+    }
+
+    /// Retry a failed replacement with the same update_id (same body).
+    public static func retryReplacement(store: LibraryStore, jobId: UUID, now: Date = Date()) {
+        store.updateJob(id: jobId, now: now) { j in
+            guard var r = j.replacement, r.state == .failed else { return }
+            r.state = .queued
+            r.attempts = 0
+            r.nextAttemptAt = nil
+            r.firstRetryAt = nil
+            r.message = nil
+            j.replacement = r
+        }
+    }
+
+    /// The website note was deleted: submit the reviewed version as a NEW note (new submission id),
+    /// reusing the local transcript — no re-transcription or re-summarising.
+    @discardableResult
+    public static func submitAsNewNote(store: LibraryStore, jobId: UUID, held: Bool = false, now: Date = Date()) throws -> Lesson {
+        guard let lesson = store.lesson(containingJob: jobId), let job = lesson.jobs.first(where: { $0.id == jobId }) else { throw RegenerationError.jobNotFound }
+        guard let transcript = store.transcript(jobId: jobId) else { throw RegenerationError.transcriptMissing }
+        let versionId = job.replacement?.versionId
+        let version = job.allNoteVersions.first { $0.id == versionId } ?? job.currentVersion
+        guard let notes = version?.notes ?? job.notes else { throw RegenerationError.versionNotFound }
+        let recs = lesson.recordings(for: job).enumerated().map { i, r -> RecordingRef in var c = r; c.id = UUID(); c.order = i; return c }
+        let c = LessonConfirmation(roomId: lesson.roomId, roomName: lesson.roomName, studentId: lesson.studentId, pupilName: lesson.pupilName,
+                                   lessonDate: lesson.lessonDate, startedAt: recs.first?.recordedAt ?? lesson.startedAt, dateSource: lesson.dateSource,
+                                   mode: recs.count == 1 && lesson.mode == .combined ? .single : (lesson.mode == .separate ? .separate : lesson.mode),
+                                   meetingTopic: lesson.meetingTopic, sourceFolder: lesson.sourceFolder, recordings: recs)
+        var settings = store.settings
+        settings.timeZoneIdentifier = lesson.timeZoneIdentifier
+        var newLesson = try LessonFactory.make(c, settings: settings, held: false, now: now, reprocessOf: lesson.id)
+        newLesson.jobs[0].stage = held ? .held : .submitting
+        newLesson.jobs[0].notes = notes
+        newLesson.jobs[0].summaryModel = version?.model ?? job.summaryModel
+        newLesson.jobs[0].reasoningEffort = version?.effort ?? job.reasoningEffort
+        newLesson.jobs[0].promptSnapshot = job.promptSnapshot
+        newLesson.jobs[0].transcriptionModel = job.transcriptionModel
+        store.addLesson(newLesson)
+        var copy = transcript
+        copy.jobId = newLesson.jobs[0].id
+        copy.parts = zip(transcript.parts, recs).map { p, r in var q = p; q.recordingId = r.id; return q }
+        try store.saveTranscript(copy)
+        store.updateJob(id: jobId, now: now) { j in
+            j.replacement = nil
+            j.remoteStatus = .deleted
+        }
+        return store.lesson(id: newLesson.id) ?? newLesson
+    }
+}

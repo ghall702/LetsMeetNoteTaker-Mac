@@ -11,14 +11,22 @@ public struct LetsMeetAPIError: Error, Equatable, LocalizedError, Sendable {
     public var fields: [APIFieldError]
     public var noteId: String?
     public var retryAfter: TimeInterval?
+    /// For `version_conflict`: the website's current version and who changed it.
+    public var currentVersion: Int?
+    public var lastChangedBy: String?
+    public var remoteUpdatedAt: String?
 
-    public init(httpStatus: Int, code: String, message: String, fields: [APIFieldError] = [], noteId: String? = nil, retryAfter: TimeInterval? = nil) {
+    public init(httpStatus: Int, code: String, message: String, fields: [APIFieldError] = [], noteId: String? = nil, retryAfter: TimeInterval? = nil,
+                currentVersion: Int? = nil, lastChangedBy: String? = nil, remoteUpdatedAt: String? = nil) {
         self.httpStatus = httpStatus
         self.code = code
         self.message = message
         self.fields = fields
         self.noteId = noteId
         self.retryAfter = retryAfter
+        self.currentVersion = currentVersion
+        self.lastChangedBy = lastChangedBy
+        self.remoteUpdatedAt = remoteUpdatedAt
     }
 
     public var errorDescription: String? {
@@ -93,7 +101,9 @@ public struct LetsMeetClient: Sendable {
     static func decodeError(_ data: Data, _ http: HTTPURLResponse) -> LetsMeetAPIError {
         if let env = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data) {
             return LetsMeetAPIError(httpStatus: http.statusCode, code: env.error.code, message: env.error.message,
-                                    fields: env.error.fields ?? [], noteId: env.error.noteId, retryAfter: http.retryAfterSeconds)
+                                    fields: env.error.fields ?? [], noteId: env.error.noteId, retryAfter: http.retryAfterSeconds,
+                                    currentVersion: env.error.currentVersion, lastChangedBy: env.error.lastChangedBy,
+                                    remoteUpdatedAt: env.error.updatedAt)
         }
         let fallbackCode: String
         switch http.statusCode {
@@ -144,6 +154,14 @@ public struct LetsMeetClient: Sendable {
         var r = resp
         if r.replayed == nil { r.replayed = (status == 200) }
         return r
+    }
+
+    /// `PATCH /notes/{note_id}` — replaces an existing note's content (returns it to pending).
+    /// `body` is an encoded `NoteReplacement`; retries resend identical bytes with the same `update_id`.
+    public func replace(noteId: String, body: Data) async throws -> NoteReplaceResponse {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))
+        let safe = noteId.addingPercentEncoding(withAllowedCharacters: allowed) ?? noteId
+        return try await perform(makeRequest("notes/\(safe)", method: "PATCH", body: body), as: NoteReplaceResponse.self).0
     }
 
     /// `GET /notes/{id}`; a 404 means the note was deleted (or never existed).

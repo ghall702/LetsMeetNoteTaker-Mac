@@ -61,6 +61,12 @@ public final class LibraryStore: @unchecked Sendable {
         modelsStorage = read(CachedModelList.self, "models.json") ?? CachedModelList()
         detectionsStorage = read([PendingDetection].self, "detections.json") ?? []
         if let s = read(AppSettings.self, "settings.json") { settingsStorage = s } else { write(settingsStorage, "settings.json") }
+        // Upgrade: a global prompt that is exactly an earlier factory default was never
+        // customised, so it moves to the new default. Customised prompts are left alone.
+        if PromptLibrary.isLegacyDefault(settingsStorage.globalPrompt) {
+            settingsStorage.globalPrompt = PromptLibrary.starterGlobalPrompt
+            write(settingsStorage, "settings.json")
+        }
     }
 
     private func changed() { onChange?() }

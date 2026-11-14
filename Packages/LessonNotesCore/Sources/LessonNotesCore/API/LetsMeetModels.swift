@@ -35,19 +35,27 @@ public struct NoteSummary: Codable, Sendable, Equatable {
     public var homework: String?
     public var vocabulary: [String]?
     public var praise: String?
+    public var learningContent: String?
+    public var workedExamples: [String]?
+    public var keyQuotes: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case overview, keyPoints = "key_points", nextSteps = "next_steps", homework, vocabulary, praise
+        case overview, keyPoints = "key_points", nextSteps = "next_steps", homework, vocabulary, praise,
+             learningContent = "learning_content", workedExamples = "worked_examples", keyQuotes = "key_quotes"
     }
 
     public init(overview: String? = nil, keyPoints: [String]? = nil, nextSteps: [String]? = nil, homework: String? = nil,
-                vocabulary: [String]? = nil, praise: String? = nil) {
+                vocabulary: [String]? = nil, praise: String? = nil, learningContent: String? = nil,
+                workedExamples: [String]? = nil, keyQuotes: [String]? = nil) {
         self.overview = overview
         self.keyPoints = keyPoints
         self.nextSteps = nextSteps
         self.homework = homework
         self.vocabulary = vocabulary
         self.praise = praise
+        self.learningContent = learningContent
+        self.workedExamples = workedExamples
+        self.keyQuotes = keyQuotes
     }
 }
 
@@ -157,14 +165,17 @@ public struct NoteStatusResponse: Codable, Sendable, Equatable {
     public var updatedAt: String?
     public var publishedAt: String?
     public var replayed: Bool?
+    /// Content version (integer, increments on every content change). Base for replacements.
+    public var version: Int?
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id", submissionId = "submission_id", roomId = "room_id", status, createdAt = "created_at",
-             updatedAt = "updated_at", publishedAt = "published_at", replayed
+             updatedAt = "updated_at", publishedAt = "published_at", replayed, version
     }
 
     public init(noteId: String?, submissionId: String, roomId: String? = nil, status: NoteStatus, createdAt: String? = nil,
-                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil) {
+                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil, version: Int? = nil) {
+        self.version = version
         self.noteId = noteId
         self.submissionId = submissionId
         self.roomId = roomId
@@ -190,7 +201,86 @@ public struct APIErrorBody: Codable, Sendable, Equatable {
     public var message: String
     public var fields: [APIFieldError]?
     public var noteId: String?
-    enum CodingKeys: String, CodingKey { case code, message, fields, noteId = "note_id" }
+    public var currentVersion: Int?
+    public var updatedAt: String?
+    public var lastChangedBy: String?
+    enum CodingKeys: String, CodingKey {
+        case code, message, fields, noteId = "note_id", currentVersion = "current_version", updatedAt = "updated_at", lastChangedBy = "last_changed_by"
+    }
+}
+
+/// Body of `PATCH /notes/{note_id}` — replaces an existing note's content. The transcript,
+/// room, date and recordings are never sent (the website rejects them).
+public struct NoteReplacement: Codable, Sendable, Equatable {
+    public var updateId: String
+    public var baseVersion: Int
+    public var title: String
+    public var summary: NoteSummary
+    /// `nil` clears the private notes on the website.
+    public var privateNotes: String?
+    public var generator: ReplacementGenerator
+
+    enum CodingKeys: String, CodingKey {
+        case updateId = "update_id", baseVersion = "base_version", title, summary, privateNotes = "private_notes", generator
+    }
+
+    public init(updateId: String, baseVersion: Int, title: String, summary: NoteSummary, privateNotes: String?, generator: ReplacementGenerator) {
+        self.updateId = updateId
+        self.baseVersion = baseVersion
+        self.title = title
+        self.summary = summary
+        self.privateNotes = privateNotes
+        self.generator = generator
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(updateId, forKey: .updateId)
+        try c.encode(baseVersion, forKey: .baseVersion)
+        try c.encode(title, forKey: .title)
+        try c.encode(summary, forKey: .summary)
+        if let privateNotes { try c.encode(privateNotes, forKey: .privateNotes) } else { try c.encodeNil(forKey: .privateNotes) }
+        try c.encode(generator, forKey: .generator)
+    }
+
+    public func jsonData() throws -> Data { try JSONCoding.encoder().encode(self) }
+}
+
+public struct ReplacementGenerator: Codable, Sendable, Equatable {
+    public var appVersion: String
+    public var summaryModel: String
+    enum CodingKeys: String, CodingKey { case appVersion = "app_version", summaryModel = "summary_model" }
+    public init(appVersion: String, summaryModel: String) { self.appVersion = appVersion; self.summaryModel = summaryModel }
+}
+
+public struct NoteReplaceResponse: Codable, Sendable, Equatable {
+    public var noteId: String?
+    public var submissionId: String?
+    public var status: NoteStatus
+    public var version: Int?
+    public var updatedAt: String?
+    public var publishedAt: String?
+    public var fieldsChanged: [String]?
+    public var previousStatus: NoteStatus?
+    public var replayed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id", submissionId = "submission_id", status, version, updatedAt = "updated_at", publishedAt = "published_at",
+             fieldsChanged = "fields_changed", previousStatus = "previous_status", replayed
+    }
+
+    public init(noteId: String?, submissionId: String?, status: NoteStatus, version: Int?, updatedAt: String? = nil, publishedAt: String? = nil,
+                fieldsChanged: [String]? = nil, previousStatus: NoteStatus? = nil, replayed: Bool? = nil) {
+        self.noteId = noteId
+        self.submissionId = submissionId
+        self.status = status
+        self.version = version
+        self.updatedAt = updatedAt
+        self.publishedAt = publishedAt
+        self.fieldsChanged = fieldsChanged
+        self.previousStatus = previousStatus
+        self.replayed = replayed
+    }
 }
 
 public struct APIErrorEnvelope: Codable, Sendable {

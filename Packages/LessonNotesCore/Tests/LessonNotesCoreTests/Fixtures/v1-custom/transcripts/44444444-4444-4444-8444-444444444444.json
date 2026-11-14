@@ -1,0 +1,1 @@
+{"jobId":"44444444-4444-4444-8444-444444444444","language":"en","model":"whisperkit/x","parts":[{"durationSec":3500,"filename":"zoom_0.mp4","recordingId":"22222222-2222-4222-8222-222222222222","segments":[{"end":4,"start":0,"text":"Hello Ellie."}]}],"savedAt":"2027-01-15T08:00:00.000Z"}

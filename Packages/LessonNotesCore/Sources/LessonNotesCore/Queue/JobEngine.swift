@@ -26,7 +26,13 @@ public struct ProducedNotes: Sendable, Equatable {
     public var notes: GeneratedNotes
     public var model: String
     public var effort: ReasoningEffort
-    public init(notes: GeneratedNotes, model: String, effort: ReasoningEffort) { self.notes = notes; self.model = model; self.effort = effort }
+    public var adjustments: [String]
+    public init(notes: GeneratedNotes, model: String, effort: ReasoningEffort, adjustments: [String] = []) {
+        self.notes = notes
+        self.model = model
+        self.effort = effort
+        self.adjustments = adjustments
+    }
 }
 
 public protocol NotesProducing: Sendable {
@@ -40,14 +46,22 @@ public protocol NoteSubmitting: Sendable {
 
 extension LetsMeetClient: NoteSubmitting {}
 
+/// `PATCH /notes/{id}` plus status lookup (for the current `version`).
+public protocol NoteReplacing: Sendable {
+    func replace(noteId: String, body: Data) async throws -> NoteReplaceResponse
+    func status(of id: String) async throws -> NoteStatusResponse
+}
+
+extension LetsMeetClient: NoteReplacing {}
+
 /// Real notes producer: OpenAI Responses API with the model chosen in Settings.
 public struct OpenAINotesProducer: NotesProducing {
     public var generator: NotesGenerator
     public init(generator: NotesGenerator) { self.generator = generator }
     public func produceNotes(transcript: String, context: NotesRequestContext, instructions: String,
                              progress: @escaping @Sendable (Double, String) -> Void) async throws -> ProducedNotes {
-        let notes = try await generator.generate(transcript: transcript, context: context, instructions: instructions, progress: progress)
-        return ProducedNotes(notes: notes, model: generator.model, effort: generator.effort)
+        let r = try await generator.generateDetailed(transcript: transcript, context: context, instructions: instructions, progress: progress)
+        return ProducedNotes(notes: r.notes, model: generator.model, effort: generator.effort, adjustments: r.adjustments)
     }
 }
 
@@ -58,9 +72,12 @@ public struct EngineDependencies: Sendable {
     public var makeSubmitter: @Sendable () throws -> NoteSubmitting
     public var isOnline: @Sendable () -> Bool
     public var appVersion: String
+    public var makeReplacer: (@Sendable () throws -> NoteReplacing)?
 
     public init(extractor: AudioExtracting, transcriber: Transcribing, makeNotesProducer: @escaping @Sendable () throws -> NotesProducing,
-                makeSubmitter: @escaping @Sendable () throws -> NoteSubmitting, isOnline: @escaping @Sendable () -> Bool, appVersion: String) {
+                makeSubmitter: @escaping @Sendable () throws -> NoteSubmitting, isOnline: @escaping @Sendable () -> Bool, appVersion: String,
+                makeReplacer: (@Sendable () throws -> NoteReplacing)? = nil) {
+        self.makeReplacer = makeReplacer
         self.extractor = extractor
         self.transcriber = transcriber
         self.makeNotesProducer = makeNotesProducer
@@ -74,6 +91,8 @@ public enum EngineEvent: Sendable, Equatable {
     case progress(jobId: UUID, fraction: Double, message: String)
     case submitted(jobId: UUID)
     case failed(jobId: UUID, message: String)
+    case replaced(jobId: UUID)
+    case replacementNeedsAttention(jobId: UUID, message: String)
     case idle
 }
 
@@ -200,6 +219,20 @@ public actor JobEngine {
             running[id] = Task { [weak self] in
                 await self?.process(jobId: id)
                 await self?.finished(jobId: id)
+            }
+        }
+        // Queued website replacements (PATCH), for submitted notes.
+        if online {
+            let due = store.allLessons.flatMap(\.jobs).filter { j in
+                guard let r = j.replacement, r.state == .queued, running[j.id] == nil else { return false }
+                return (r.nextAttemptAt ?? .distantPast) <= t
+            }
+            for job in due where running.count < maxJobs + 2 {
+                let id = job.id
+                running[id] = Task { [weak self] in
+                    await self?.processReplacement(jobId: id)
+                    await self?.finished(jobId: id)
+                }
             }
         }
         if running.isEmpty { emit(.idle) }
@@ -433,6 +466,7 @@ public actor JobEngine {
         }
         update(job.id) {
             $0.notes = produced.notes
+            $0.notesAdjustments = produced.adjustments.isEmpty ? nil : produced.adjustments
             $0.summaryModel = produced.model
             $0.reasoningEffort = produced.effort
             $0.stage = .submitting
@@ -470,6 +504,7 @@ public actor JobEngine {
         update(job.id) {
             $0.noteId = response.noteId
             $0.remoteStatus = response.status
+            $0.remoteVersion = response.version ?? $0.remoteVersion
             $0.replayed = response.replayed
             $0.remoteUpdatedAt = response.updatedAt
             $0.submittedAt = now()
@@ -483,6 +518,150 @@ public actor JobEngine {
             $0.completedStagesAt["submitted"] = now()
         }
         emit(.submitted(jobId: job.id))
+    }
+}
+
+// MARK: Website replacements (PATCH)
+
+extension JobEngine {
+    func processReplacement(jobId: UUID) async {
+        guard let lesson = store.lesson(containingJob: jobId), let job = lesson.jobs.first(where: { $0.id == jobId }),
+              var rep = job.replacement, rep.state == .queued else { return }
+        guard let version = job.allNoteVersions.first(where: { $0.id == rep.versionId }) else {
+            store.updateJob(id: jobId, now: now()) { $0.replacement = nil }
+            return
+        }
+        let noteRef = job.noteId ?? job.submissionId
+        do {
+            guard let makeReplacer = deps.makeReplacer else { throw LetsMeetClientError.missingKey }
+            let replacer = try makeReplacer()
+            if rep.body == nil {
+                if rep.baseVersion == nil {
+                    let st = try await replacer.status(of: noteRef)
+                    if st.status == .deleted {
+                        markReplacement(jobId, state: .noteDeleted, message: "This note has been deleted on the website.")
+                        store.updateJob(id: jobId, now: now()) { $0.remoteStatus = .deleted }
+                        return
+                    }
+                    guard let v = st.version else {
+                        markReplacement(jobId, state: .failed, message: "The website did not report the note's version, so it cannot be replaced safely.")
+                        return
+                    }
+                    rep.baseVersion = v
+                }
+                let n = NotesSchema.sanitise(version.notes)
+                let body = NoteReplacement(updateId: rep.updateId, baseVersion: rep.baseVersion!, title: n.title, summary: NotesSchema.summary(from: n),
+                                           privateNotes: n.privateNotes.isEmpty ? nil : n.privateNotes,
+                                           generator: ReplacementGenerator(appVersion: String(deps.appVersion.prefix(100)), summaryModel: String(version.model.prefix(100))))
+                let issues = SubmissionValidator.validate(body)
+                if !issues.isEmpty {
+                    markReplacement(jobId, state: .failed, message: "The new notes could not be validated: " + issues.map(\.description).joined(separator: "; "))
+                    return
+                }
+                rep.body = try body.jsonData()
+                let frozen = rep
+                store.updateJob(id: jobId, now: now()) { $0.replacement = frozen }
+            }
+            emit(.progress(jobId: jobId, fraction: 0.5, message: "Replacing notes on the website"))
+            let resp = try await replacer.replace(noteId: noteRef, body: rep.body!)
+            completeReplacement(jobId, version: version, response: resp)
+        } catch let e as LetsMeetAPIError {
+            switch (e.httpStatus, e.code) {
+            case (409, "version_conflict"):
+                store.updateJob(id: jobId, now: now()) { j in
+                    j.replacement?.state = .conflict
+                    j.replacement?.conflictCurrentVersion = e.currentVersion
+                    j.replacement?.conflictChangedBy = e.lastChangedBy
+                    j.replacement?.conflictUpdatedAt = e.remoteUpdatedAt
+                    j.replacement?.message = "This note was changed on the website since you generated this version."
+                    j.replacement?.nextAttemptAt = nil
+                }
+                emit(.replacementNeedsAttention(jobId: jobId, message: "This note was changed on the website since you generated this version."))
+            case (409, "update_id_conflict"):
+                // A reused update_id with a different body: generate a fresh id and resend.
+                store.updateJob(id: jobId, now: now()) { j in
+                    j.replacement?.updateId = PendingReplacement.makeUpdateId(now: now())
+                    j.replacement?.body = nil
+                    j.replacement?.attempts += 1
+                    if (j.replacement?.attempts ?? 0) > 3 { j.replacement?.state = .failed; j.replacement?.message = e.message }
+                }
+            case (404, _):
+                store.updateJob(id: jobId, now: now()) { $0.remoteStatus = .deleted }
+                markReplacement(jobId, state: .noteDeleted, message: "This note has been deleted on the website. You can submit these notes as a new note.")
+            case (422, "no_changes"):
+                completeReplacement(jobId, version: version, response: nil)
+            default:
+                if e.isRetryable { scheduleReplacementRetry(jobId, message: e.message, retryAfter: e.retryAfter) }
+                else { markReplacement(jobId, state: .failed, message: e.localizedDescription) }
+            }
+        } catch {
+            switch FailureClass.classify(error, now: now()) {
+            case .offline:
+                store.updateJob(id: jobId, now: now()) { $0.replacement?.message = "Waiting for internet"; $0.replacement?.nextAttemptAt = now().addingTimeInterval(30) }
+            case .retryable(let m, let ra):
+                scheduleReplacementRetry(jobId, message: m, retryAfter: ra)
+            case .cancelled:
+                return
+            case .fatal(let je):
+                markReplacement(jobId, state: .failed, message: je.message)
+            }
+        }
+    }
+
+    private func markReplacement(_ jobId: UUID, state: PendingReplacement.State, message: String) {
+        store.updateJob(id: jobId, now: now()) { j in
+            j.replacement?.state = state
+            j.replacement?.message = message
+            j.replacement?.nextAttemptAt = nil
+        }
+        emit(.replacementNeedsAttention(jobId: jobId, message: message))
+    }
+
+    private func scheduleReplacementRetry(_ jobId: UUID, message: String, retryAfter: TimeInterval?) {
+        let t = now()
+        var gaveUp = false
+        store.updateJob(id: jobId, now: t) { j in
+            guard var r = j.replacement else { return }
+            r.attempts += 1
+            let first = r.firstRetryAt ?? t
+            r.firstRetryAt = first
+            if let next = retryPolicy.nextAttempt(attempt: r.attempts, firstRetryAt: first, now: t, retryAfter: retryAfter) {
+                r.nextAttemptAt = next
+                r.message = "Will retry — \(message)"
+            } else {
+                gaveUp = true
+            }
+            j.replacement = r
+        }
+        if gaveUp { markReplacement(jobId, state: .failed, message: "Gave up after retrying for 24 hours: \(message)") }
+    }
+
+    private func completeReplacement(_ jobId: UUID, version: NoteVersion, response: NoteReplaceResponse?) {
+        let t = now()
+        store.updateJob(id: jobId, now: t) { j in
+            j.materialiseVersions()
+            for i in j.noteVersions!.indices {
+                if j.noteVersions![i].state == .current { j.noteVersions![i].state = .superseded }
+                if j.noteVersions![i].id == version.id {
+                    j.noteVersions![i].state = .current
+                    j.noteVersions![i].websiteVersion = response?.version ?? j.remoteVersion
+                }
+            }
+            j.notes = version.notes
+            j.summaryModel = version.model
+            j.reasoningEffort = version.effort
+            j.notesAdjustments = version.adjustments.isEmpty ? nil : version.adjustments
+            if let r = response {
+                j.remoteStatus = r.status
+                if let v = r.version { j.remoteVersion = v }
+                if let n = r.noteId { j.noteId = n }
+                j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
+                if r.status != .published { j.publishedAt = nil }
+            }
+            j.remoteCheckedAt = t
+            j.replacement = nil
+        }
+        emit(.replaced(jobId: jobId))
     }
 }
 
@@ -536,6 +715,7 @@ public enum StatusSync {
                 j.remoteStatus = r.status
                 j.remoteCheckedAt = now
                 if let nid = r.noteId { j.noteId = nid }
+                if let v = r.version { j.remoteVersion = v }
                 j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
                 if r.status == .published {
                     j.publishedAt = r.publishedAt.flatMap(CoreFormat.parseISO8601) ?? j.publishedAt ?? now

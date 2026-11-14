@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 @testable import LessonNotesCore
 
-let validNotesJSON = #"{"title":"The water cycle","overview":"We learned about evaporation.","key_points":["Evaporation"],"next_steps":["Draw it"],"homework":"Draw and label the water cycle.","vocabulary":["evaporation"],"praise":"Great answers!","private_notes":""}"#
+let validNotesJSON = ###"{"title":"The water cycle","overview":"We learned about evaporation.","key_points":["Evaporation"],"next_steps":["Draw it"],"homework":"Draw and label the water cycle.","vocabulary":["evaporation"],"praise":"Great answers!","key_quotes":[],"learning_content":"## Evaporation\nWater turns into **vapour**.","worked_examples":[],"private_notes":""}"###
 
 func responseObject(text: String) -> String {
     let escaped = String(data: try! JSONSerialization.data(withJSONObject: [text]), encoding: .utf8)!.dropFirst().dropLast()
@@ -25,7 +25,8 @@ final class OpenAIRequestTests: XCTestCase {
         XCTAssertEqual(format["name"] as? String, "lesson_notes")
         let schema = format["schema"] as! [String: Any]
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
-        XCTAssertEqual(Set(schema["required"] as! [String]), ["title", "overview", "key_points", "next_steps", "homework", "vocabulary", "praise", "private_notes"])
+        XCTAssertEqual(schema["required"] as! [String], ["title", "overview", "key_points", "next_steps", "homework", "vocabulary", "praise",
+                                                         "key_quotes", "learning_content", "worked_examples", "private_notes"])
         let input = b["input"] as! [[String: Any]]
         XCTAssertEqual(input[0]["role"] as? String, "user")
         XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: b))
@@ -170,8 +171,8 @@ final class NotesSchemaAndGeneratorTests: XCTestCase {
         XCTAssertLessThanOrEqual(s.vocabulary[0].utf16.count, 200)
         XCTAssertLessThanOrEqual(s.praise.utf16.count, 1000)
         let summary = NotesSchema.summary(from: GeneratedNotes(title: "T"))
-        XCTAssertNil(summary.homework)
-        XCTAssertNil(summary.keyPoints)
+        XCTAssertEqual(summary.homework, "")
+        XCTAssertEqual(summary.keyPoints, [])
     }
 
     struct ScriptedPerformer: ResponsesPerforming {

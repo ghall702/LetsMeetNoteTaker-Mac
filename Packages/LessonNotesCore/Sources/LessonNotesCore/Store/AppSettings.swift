@@ -43,6 +43,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var onboardingCompleted: Bool = false
     public var installId: UUID = UUID()
     public var notifyOnSubmitted: Bool = true
+    /// `max_output_tokens` for OpenAI; nil = the model's own maximum (recommended).
+    public var maxOutputTokens: Int?
 
     public init() {}
 
@@ -54,7 +56,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case websiteBaseURL, openAIModel, reasoningEffort, globalPrompt, transcriptionModel, transcriptionLanguage, zoomFolderPath,
              zoomFolderBookmark, watchFolder, autoProcessAfterConfirm, retention, timeZoneIdentifier,
-             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted
+             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,5 +79,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         onboardingCompleted = try c.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? d.onboardingCompleted
         installId = try c.decodeIfPresent(UUID.self, forKey: .installId) ?? d.installId
         notifyOnSubmitted = try c.decodeIfPresent(Bool.self, forKey: .notifyOnSubmitted) ?? d.notifyOnSubmitted
+        maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
     }
 }

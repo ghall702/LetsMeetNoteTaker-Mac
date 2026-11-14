@@ -12,6 +12,24 @@ public enum SubmissionValidator {
 
     static func utf16Count(_ s: String) -> Int { s.utf16.count }
 
+    /// Validates a `PATCH` replacement body (§ Replacing notes).
+    public static func validate(_ r: NoteReplacement) -> [Issue] {
+        var issues: [Issue] = []
+        func add(_ f: String, _ m: String) { issues.append(Issue(field: f, message: m)) }
+        if !(8...100).contains(r.updateId.count) || r.updateId.unicodeScalars.contains(where: { !idChars.contains($0) }) {
+            add("update_id", "must be 8–100 characters of A–Z, a–z, 0–9 . _ : -")
+        }
+        if r.baseVersion < 1 { add("base_version", "must be an integer ≥ 1") }
+        let t = r.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty || utf16Count(r.title) > 200 { add("title", "must be 1–200 characters") }
+        if let p = r.privateNotes, utf16Count(p) > 10_000 { add("private_notes", "must be at most 10000 characters") }
+        let probe = NoteSubmission(submissionId: "probe-0000", roomId: String(repeating: "0", count: 32), lessonDate: "2026-01-01", startedAt: nil,
+                                   endedAt: nil, title: "x", summary: r.summary, transcript: "x", privateNotes: nil, recordings: [], mode: .single, generator: nil)
+        issues += validate(probe).filter { $0.field.hasPrefix("summary.") }
+        if let body = try? r.jsonData(), body.count > APILimits.maxRequestBodyBytes { add("body", "request is larger than \(APILimits.maxRequestBodyBytes) bytes") }
+        return issues
+    }
+
     public static func validate(_ n: NoteSubmission) -> [Issue] {
         var issues: [Issue] = []
         func add(_ f: String, _ m: String) { issues.append(Issue(field: f, message: m)) }
@@ -45,6 +63,9 @@ public enum SubmissionValidator {
         checkString("summary.homework", n.summary.homework, 2000)
         checkArray("summary.vocabulary", n.summary.vocabulary, maxItems: 50, maxLen: 200)
         checkString("summary.praise", n.summary.praise, 1000)
+        checkString("summary.learning_content", n.summary.learningContent, NoteLimits.learningContent)
+        checkArray("summary.worked_examples", n.summary.workedExamples, maxItems: 20, maxLen: 5000)
+        checkArray("summary.key_quotes", n.summary.keyQuotes, maxItems: 20, maxLen: 500)
         // The full transcript is mandatory for this app (never omitted or shortened).
         if let tr = n.transcript {
             if tr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { add("transcript", "is empty") }

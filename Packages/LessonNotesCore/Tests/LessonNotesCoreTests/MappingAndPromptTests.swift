@@ -101,9 +101,10 @@ final class PromptTests: XCTestCase {
     func testRequiredRulesAlwaysAppended() {
         for m in [nil, StudentMapping(roomId: roomDT, displayName: "D", promptMode: .custom, customPrompt: "Only this")] {
             let r = PromptResolver.resolve(globalPrompt: "Anything", mapping: m)
-            XCTAssertTrue(r.effectiveInstructions.contains("Never include swearing"))
-            XCTAssertTrue(r.effectiveInstructions.contains("UK English"))
-            XCTAssertTrue(r.effectiveInstructions.contains("actually assigned"))
+            XCTAssertTrue(r.effectiveInstructions.contains("Never include profanity"))
+            XCTAssertTrue(r.effectiveInstructions.contains("British English"))
+            XCTAssertTrue(r.effectiveInstructions.contains("explicitly assigned"))
+            XCTAssertTrue(r.effectiveInstructions.contains("Never write filler"))
         }
     }
 

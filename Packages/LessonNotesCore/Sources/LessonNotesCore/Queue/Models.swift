@@ -129,6 +129,15 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var completedStagesAt: [String: Date]
+    // Added in version 2 (optional so data saved by version 1 still loads).
+    /// Website content `version` last seen (base for replacements).
+    public var remoteVersion: Int?
+    /// Local history of generated notes (original + regenerated versions).
+    public var noteVersions: [NoteVersion]?
+    /// A replacement queued for `PATCH /notes/{id}`.
+    public var replacement: PendingReplacement?
+    /// Anything changed to fit the website limits when the current notes were generated.
+    public var notesAdjustments: [String]?
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

@@ -37,6 +37,7 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
     case refusal(String)
     case emptyOutput
     case incomplete(String)
+    case streamInterrupted
     case invalidOutput(String)
     case unexpected(String)
 
@@ -54,7 +55,11 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
         case .server(let s, let m): return "OpenAI server error \(s); will retry. \(m)"
         case .refusal(let m): return "OpenAI declined to write notes." + (m.isEmpty ? "" : " (\(m))")
         case .emptyOutput: return "OpenAI declined to write notes (empty response)."
-        case .incomplete(let r): return "OpenAI stopped before finishing the notes (\(r))."
+        case .incomplete(let r):
+            return r == "max_output_tokens"
+                ? "OpenAI reached its output limit before finishing the notes, even when the notes were generated in two parts. Nothing incomplete was saved. Try a model with a larger output limit, a lower reasoning effort, or raise “Maximum output tokens” in Settings → OpenAI."
+                : "OpenAI stopped before finishing the notes (\(r)). Nothing incomplete was saved."
+        case .streamInterrupted: return "The connection to OpenAI ended before the notes were complete; will retry. Nothing incomplete was saved."
         case .invalidOutput(let m): return "OpenAI returned notes in an unexpected format: \(m)"
         case .unexpected(let m): return "Unexpected OpenAI response: \(m)"
         }
@@ -62,7 +67,7 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
 
     public var isRetryable: Bool {
         switch self {
-        case .rateLimited, .server: return true
+        case .rateLimited, .server, .streamInterrupted: return true
         default: return false
         }
     }
@@ -221,6 +226,7 @@ public struct OpenAIClient: Sendable {
         if let refusal = r.refusal, !refusal.isEmpty { throw OpenAIError.refusal(refusal) }
         if r.status == "incomplete" { throw OpenAIError.incomplete(r.incompleteReason ?? "incomplete") }
         if r.status == "failed" { throw OpenAIError.unexpected("response failed") }
+        if r.status != "completed" { throw OpenAIError.incomplete(r.status) }
         if r.outputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw OpenAIError.emptyOutput }
     }
 
@@ -276,8 +282,13 @@ public struct OpenAIClient: Sendable {
                 break
             }
         }
-        var result = final ?? ResponsesResult(outputText: accumulated, refusal: nil, status: "completed", incompleteReason: nil, model: nil)
-        if result.outputText.isEmpty { result.outputText = accumulated }
+        // Only a terminal `response.completed` / `response.incomplete` event proves the stream finished.
+        // Text received without it may be cut off, so it is never treated as complete.
+        guard var result = final else {
+            if !refusal.isEmpty { throw OpenAIError.refusal(refusal) }
+            throw OpenAIError.streamInterrupted
+        }
+        if result.outputText.isEmpty && result.status == "completed" { result.outputText = accumulated }
         if result.refusal == nil, !refusal.isEmpty { result.refusal = refusal }
         try Self.check(result)
         return result
