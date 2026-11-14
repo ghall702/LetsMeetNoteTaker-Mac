@@ -39,6 +39,10 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
     case incomplete(String)
     case streamInterrupted
     case invalidOutput(String)
+    /// Free-allowance protection: wait for the daily reset (local safeguard).
+    case allowanceWait(String, until: Date)
+    /// Free-allowance protection: request would always be paid / too large.
+    case allowanceBlocked(String)
     case unexpected(String)
 
     public var errorDescription: String? {
@@ -60,6 +64,8 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
                 ? "OpenAI reached its output limit before finishing the notes, even when the notes were generated in two parts. Nothing incomplete was saved. Try a model with a larger output limit, a lower reasoning effort, or raise “Maximum output tokens” in Settings → OpenAI."
                 : "OpenAI stopped before finishing the notes (\(r)). Nothing incomplete was saved."
         case .streamInterrupted: return "The connection to OpenAI ended before the notes were complete; will retry. Nothing incomplete was saved."
+        case .allowanceWait(let m, _): return m
+        case .allowanceBlocked(let m): return m
         case .invalidOutput(let m): return "OpenAI returned notes in an unexpected format: \(m)"
         case .unexpected(let m): return "Unexpected OpenAI response: \(m)"
         }
@@ -67,13 +73,14 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
 
     public var isRetryable: Bool {
         switch self {
-        case .rateLimited, .server, .streamInterrupted: return true
+        case .rateLimited, .server, .streamInterrupted, .allowanceWait: return true
         default: return false
         }
     }
 
     public var retryAfter: TimeInterval? {
         if case .rateLimited(_, let r) = self { return r }
+        if case .allowanceWait(_, let until) = self { return max(60, until.timeIntervalSinceNow + 60) }
         return nil
     }
 }
@@ -125,6 +132,20 @@ public struct ResponsesResult: Sendable, Equatable {
     public var status: String
     public var incompleteReason: String?
     public var model: String?
+    /// OpenAI response id and reported token usage (nil if not reported).
+    public var responseId: String? = nil
+    public var usage: TokenUsage? = nil
+}
+
+/// Collects the id/usage of a response as soon as OpenAI reports them, so usage is recorded
+/// even when the request then fails validation (refusal, incomplete, etc.).
+final class UsageCapture: @unchecked Sendable {
+    var responseId: String?
+    var usage: TokenUsage?
+    func take(_ r: ResponsesResult) {
+        if let id = r.responseId { responseId = id }
+        if let u = r.usage { usage = u }
+    }
 }
 
 public struct OpenAIClient: Sendable {
@@ -132,6 +153,8 @@ public struct OpenAIClient: Sendable {
     public var apiKey: String
     public var baseURL: URL
     public var transport: HTTPTransport
+    /// Records token usage of every Responses request and applies free-allowance protection.
+    public var usageMonitor: UsageMonitor?
 
     public init(apiKey: String, transport: HTTPTransport, baseURL: URL = OpenAIClient.defaultBaseURL) throws {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,7 +245,8 @@ public struct OpenAIClient: Sendable {
         if text.isEmpty, let t = obj["output_text"] as? String { text = t }
         let incomplete = (obj["incomplete_details"] as? [String: Any])?["reason"] as? String
         return ResponsesResult(outputText: text, refusal: refusal, status: (obj["status"] as? String) ?? "completed",
-                               incompleteReason: incomplete, model: obj["model"] as? String)
+                               incompleteReason: incomplete, model: obj["model"] as? String,
+                               responseId: obj["id"] as? String, usage: TokenUsage.parse(obj["usage"]))
     }
 
     static func check(_ r: ResponsesResult) throws {
@@ -235,6 +259,59 @@ public struct OpenAIClient: Sendable {
 
     /// Non-streaming request.
     public func createResponse(_ req: ResponsesRequest) async throws -> ResponsesResult {
+        try await monitored(req) { cap in try await createResponseUnmonitored(req, capture: cap) }
+    }
+
+    /// Streaming request (`stream: true`). `onProgress` receives the number of output characters so far.
+    public func streamResponse(_ req: ResponsesRequest, onProgress: (@Sendable (Int) -> Void)? = nil) async throws -> ResponsesResult {
+        try await monitored(req) { cap in try await streamResponseUnmonitored(req, capture: cap, onProgress: onProgress) }
+    }
+
+    // MARK: Usage monitoring (central point for every Responses request)
+
+    /// Exact input-token count from OpenAI (`POST /v1/responses/input_tokens`); nil if unavailable.
+    public func countInputTokens(_ req: ResponsesRequest) async -> Int? {
+        var body = req.body(stream: false)
+        for k in ["stream", "store", "reasoning", "max_output_tokens"] { body[k] = nil }
+        guard let r = try? request("responses/input_tokens", method: "POST", json: body),
+              let (data, http) = try? await transport.send(r), http.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (obj["input_tokens"] as? NSNumber)?.intValue
+    }
+
+    /// Conservative fallback when the count endpoint is unavailable (≈ 3 characters per token plus schema overhead).
+    public static func roughInputEstimate(_ req: ResponsesRequest) -> Int {
+        (req.instructions.utf8.count + req.userContent.utf8.count) / 3 + 800
+    }
+
+    func monitored(_ req: ResponsesRequest, _ body: (UsageCapture) async throws -> ResponsesResult) async throws -> ResponsesResult {
+        guard let monitor = usageMonitor else { return try await body(UsageCapture()) }
+        var reservation: UUID?
+        if monitor.settings().protectionEnabled {
+            let input: Int
+            if let counted = await countInputTokens(req) { input = counted } else { input = Self.roughInputEstimate(req) }
+            switch monitor.check(model: req.model, estimatedInput: input, maxOutput: req.maxOutputTokens) {
+            case .allowed(let r): reservation = r
+            case .waitForReset(let m, let until): throw OpenAIError.allowanceWait(m, until: until)
+            case .blocked(let m): throw OpenAIError.allowanceBlocked(m)
+            }
+        }
+        defer { monitor.release(reservation) }
+        let cap = UsageCapture()
+        do {
+            let r = try await body(cap)
+            monitor.record(responseId: r.responseId ?? cap.responseId, model: req.model, outcome: .succeeded, usage: r.usage ?? cap.usage)
+            return r
+        } catch {
+            var outcome = UsageRecord.Outcome.failed
+            if case OpenAIError.incomplete? = error as? OpenAIError { outcome = .incomplete }
+            monitor.record(responseId: cap.responseId, model: req.model, outcome: outcome, usage: cap.usage,
+                           error: error is CancellationError ? "cancelled" : (error as? LocalizedError)?.errorDescription ?? String(describing: error))
+            throw error
+        }
+    }
+
+    func createResponseUnmonitored(_ req: ResponsesRequest, capture: UsageCapture) async throws -> ResponsesResult {
         let (data, http) = try await transport.send(try request("responses", method: "POST", json: req.body(stream: false)))
         guard http.statusCode == 200 else { throw Self.mapError(status: http.statusCode, data: data, retryAfter: http.retryAfterSeconds) }
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw OpenAIError.unexpected("not JSON") }
@@ -243,12 +320,12 @@ public struct OpenAIClient: Sendable {
             throw OpenAIError.unexpected(m)
         }
         let r = Self.parseResponseObject(obj)
+        capture.take(r)
         try Self.check(r)
         return r
     }
 
-    /// Streaming request (`stream: true`). `onProgress` receives the number of output characters so far.
-    public func streamResponse(_ req: ResponsesRequest, onProgress: (@Sendable (Int) -> Void)? = nil) async throws -> ResponsesResult {
+    func streamResponseUnmonitored(_ req: ResponsesRequest, capture: UsageCapture, onProgress: (@Sendable (Int) -> Void)?) async throws -> ResponsesResult {
         let (http, lines) = try await transport.streamLines(try request("responses", method: "POST", json: req.body(stream: true), stream: true))
         guard http.statusCode == 200 else {
             var body = ""
@@ -268,10 +345,13 @@ public struct OpenAIClient: Sendable {
                 onProgress?(accumulated.count)
             case "response.refusal.delta":
                 refusal += (event.payload["delta"] as? String) ?? ""
+            case "response.created":
+                if let id = (event.payload["response"] as? [String: Any])?["id"] as? String { capture.responseId = id }
             case "response.completed", "response.incomplete":
-                if let resp = event.payload["response"] as? [String: Any] { final = Self.parseResponseObject(resp) }
+                if let resp = event.payload["response"] as? [String: Any] { final = Self.parseResponseObject(resp); capture.take(final!) }
             case "response.failed":
                 let resp = event.payload["response"] as? [String: Any]
+                if let resp { capture.take(Self.parseResponseObject(resp)) }
                 let err = resp?["error"] as? [String: Any]
                 let msg = (err?["message"] as? String) ?? "response failed"
                 let code = err?["code"] as? String

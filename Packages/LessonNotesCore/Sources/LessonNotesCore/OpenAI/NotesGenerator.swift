@@ -151,7 +151,7 @@ public struct NotesGenerator: Sendable {
             let content = context.header()
                 + "This is part \(i + 1) of \(chunks.count) of the transcript of ONE lesson. Write notes for this part only; they will be merged later.\n"
                 + "Transcript (part \(i + 1)):\n" + chunk
-            let (notes, s) = try await completeNotes(instructions: instructions, content: content, onProgress: nil)
+            let (notes, s) = try await withPurpose(.notesPart) { try await completeNotes(instructions: instructions, content: content, onProgress: nil) }
             split = split || s
             partials.append(NotesSchema.sanitise(notes))
         }
@@ -165,8 +165,9 @@ public struct NotesGenerator: Sendable {
         write one overall title and overview, and keep private observations in `private_notes`. Do not add anything that is not in the partial notes. \
         Fields that are empty in every part stay empty.
         """
-        let (raw, s) = try await completeNotes(instructions: reduceInstructions,
-                                               content: context.header() + "Partial notes (JSON):\n" + encoded, onProgress: nil)
+        let (raw, s) = try await withPurpose(.notesCombine) {
+            try await completeNotes(instructions: reduceInstructions, content: context.header() + "Partial notes (JSON):\n" + encoded, onProgress: nil)
+        }
         let n = NotesSchema.normalise(raw)
         return GenerationResult(notes: n.notes, adjustments: n.adjustments, usedSplitGeneration: split || s)
     }
@@ -174,6 +175,13 @@ public struct NotesGenerator: Sendable {
     public func generate(transcript: String, context: NotesRequestContext, instructions: String,
                          progress: (@Sendable (Double, String) -> Void)? = nil) async throws -> GeneratedNotes {
         try await generateDetailed(transcript: transcript, context: context, instructions: instructions, progress: progress).notes
+    }
+
+    /// Labels usage records for chunked notes (only when a lesson context is set).
+    func withPurpose<T>(_ p: UsagePurpose, _ body: () async throws -> T) async throws -> T {
+        guard var ctx = UsageContext.current, ctx.purpose == .lessonNotes else { return try await body() }
+        ctx.purpose = p
+        return try await UsageContext.$current.withValue(ctx) { try await body() }
     }
 
     func parse(_ text: String) throws -> GeneratedNotes {

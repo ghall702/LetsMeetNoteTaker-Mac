@@ -47,6 +47,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var maxOutputTokens: Int?
     /// Whisper transcriptions that may run at the same time (1–8). Default 1 for stability.
     public var maxConcurrentTranscriptions: Int = 1
+    /// OpenAI usage counter, pricing and free-allowance protection.
+    public var usage = UsageSettings()
 
     public init() {}
 
@@ -58,7 +60,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case websiteBaseURL, openAIModel, reasoningEffort, globalPrompt, transcriptionModel, transcriptionLanguage, zoomFolderPath,
              zoomFolderBookmark, watchFolder, autoProcessAfterConfirm, retention, timeZoneIdentifier,
-             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions
+             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions, usage
     }
 
     public init(from decoder: Decoder) throws {
@@ -83,5 +85,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         notifyOnSubmitted = try c.decodeIfPresent(Bool.self, forKey: .notifyOnSubmitted) ?? d.notifyOnSubmitted
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         maxConcurrentTranscriptions = min(8, max(1, try c.decodeIfPresent(Int.self, forKey: .maxConcurrentTranscriptions) ?? 1))
+        usage = (try? c.decodeIfPresent(UsageSettings.self, forKey: .usage)) ?? d.usage
     }
 }

@@ -29,7 +29,7 @@ public enum StorageBackup {
         try fm.createDirectory(at: dest.appendingPathComponent("transcripts"), withIntermediateDirectories: true)
 
         var copied: [(URL, URL)] = []
-        for item in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] where item.pathExtension == "json" {
+        for item in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] where item.pathExtension == "json" || item.pathExtension == "jsonl" {
             let to = dest.appendingPathComponent(item.lastPathComponent)
             try fm.copyItem(at: item, to: to)
             copied.append((item, to))

@@ -428,6 +428,8 @@ public actor JobEngine {
         case .cancelled:
             // App shutting down: leave the job at its stage so it resumes next launch.
             return
+        case .deferred(let message, let until):
+            update(jobId) { $0.statusMessage = message; $0.nextAttemptAt = until }
         case .offline:
             update(jobId) { $0.statusMessage = "Waiting for internet"; $0.nextAttemptAt = t.addingTimeInterval(30) }
         case .retryable(let message, let retryAfter):
@@ -539,9 +541,11 @@ public actor JobEngine {
                                           lessonDate: lesson.lessonDate, recordingSummary: summary)
         let jobId = job.id
         let handler = eventHandler
-        let produced = try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
-                                                       context: context, instructions: prompt!.effectiveInstructions) { p, msg in
-            handler?(.progress(jobId: jobId, fraction: p, message: msg))
+        let produced = try await UsageContext.$current.withValue(UsageContext(lessonId: lesson.id, jobId: jobId, purpose: .lessonNotes)) {
+            try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
+                                            context: context, instructions: prompt!.effectiveInstructions) { p, msg in
+                handler?(.progress(jobId: jobId, fraction: p, message: msg))
+            }
         }
         update(job.id) {
             $0.notes = produced.notes
@@ -679,7 +683,7 @@ extension JobEngine {
                 store.updateJob(id: jobId, now: now()) { $0.replacement?.message = "Waiting for internet"; $0.replacement?.nextAttemptAt = now().addingTimeInterval(30) }
             case .retryable(let m, let ra):
                 scheduleReplacementRetry(jobId, message: m, retryAfter: ra)
-            case .cancelled:
+            case .cancelled, .deferred:
                 return
             case .fatal(let je):
                 markReplacement(jobId, state: .failed, message: je.message)

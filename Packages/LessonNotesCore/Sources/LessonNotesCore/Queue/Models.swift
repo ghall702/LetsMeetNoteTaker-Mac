@@ -57,6 +57,8 @@ public struct JobError: Codable, Equatable, Sendable {
         case openAICredits
         /// OpenAI key, permission or model problem: fix in Settings, then retry.
         case openAISettings
+        /// Blocked by the local free-allowance protection.
+        case allowanceProtection
     }
     public var message: String
     public var kind: Kind

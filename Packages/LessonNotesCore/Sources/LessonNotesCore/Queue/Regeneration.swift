@@ -62,9 +62,11 @@ public enum NotesRegeneration {
         case .temporary(let text):
             prompt = PromptResolver.temporary(text, additionalInstructions: options.additionalInstructions)
         }
-        let produced = try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
-                                                       context: context(for: lesson, job: job, mapping: mapping),
-                                                       instructions: prompt.effectiveInstructions, progress: progress)
+        let produced = try await UsageContext.$current.withValue(UsageContext(lessonId: lesson.id, jobId: jobId, purpose: .regenerate)) {
+            try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
+                                            context: context(for: lesson, job: job, mapping: mapping),
+                                            instructions: prompt.effectiveInstructions, progress: progress)
+        }
         let extra = options.additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let version = NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: produced.notes, model: produced.model,
                                   effort: produced.effort, promptSource: prompt.source, promptSnapshot: prompt.effectiveInstructions,

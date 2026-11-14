@@ -35,6 +35,8 @@ public enum FailureClass: Equatable, Sendable {
     case retryable(message: String, retryAfter: TimeInterval?)
     case fatal(JobError)
     case cancelled
+    /// Waiting for a known time (e.g. the free OpenAI allowance reset); not counted as a retry.
+    case deferred(message: String, until: Date)
 
     public static func classify(_ error: Error, now: Date = Date()) -> FailureClass {
         if error is CancellationError { return .cancelled }
@@ -58,6 +60,8 @@ public enum FailureClass: Equatable, Sendable {
             return .fatal(JobError(message: e.localizedDescription, kind: kind, httpStatus: e.httpStatus, code: e.code, occurredAt: now))
         }
         if let e = error as? OpenAIError {
+            if case .allowanceWait(let m, let until) = e { return .deferred(message: m, until: until.addingTimeInterval(60)) }
+            if case .allowanceBlocked(let m) = e { return .fatal(JobError(message: m, kind: .allowanceProtection, occurredAt: now)) }
             if e.isRetryable { return .retryable(message: e.localizedDescription, retryAfter: e.retryAfter) }
             switch e {
             case .quotaExceeded(let detail):
