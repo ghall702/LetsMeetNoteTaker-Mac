@@ -180,13 +180,18 @@ struct LessonDetailView: View {
             if let orig = lesson.reprocessOf, model.lesson(orig) != nil {
                 Button("Reprocessed from an earlier lesson — show original") { model.selectedLessonId = orig }.buttonStyle(.link)
             }
-            HStack {
-                Link(destination: AppInfo.adminToolsURL) { Label("Open Admin Tools", systemImage: "safari") }
-                Button { confirmReprocess = true } label: { Label("Reprocess Anyway", systemImage: "arrow.triangle.2.circlepath") }
-                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete Local Data", systemImage: "trash") }
+            ViewThatFits(in: .horizontal) {
+                HStack { headerButtons }
+                VStack(alignment: .leading, spacing: 6) { headerButtons }
             }
             .padding(.top, 4)
         }
+    }
+
+    @ViewBuilder var headerButtons: some View {
+        Link(destination: AppInfo.adminToolsURL) { Label("Open Admin Tools", systemImage: "safari") }.fixedSize()
+        Button { confirmReprocess = true } label: { Label("Reprocess Anyway", systemImage: "arrow.triangle.2.circlepath") }.fixedSize()
+        Button(role: .destructive) { confirmDelete = true } label: { Label("Delete Local Data", systemImage: "trash") }.fixedSize()
     }
 
     var recordings: some View {
