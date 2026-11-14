@@ -48,6 +48,16 @@ final class WhisperModelManager: ObservableObject {
         return "unknown size"
     }
 
+    /// Rough working-memory need of one loaded model while transcribing (for warnings only).
+    static func estimatedMemoryBytes(_ name: String) -> Int64 {
+        let n = name.lowercased()
+        let gb: Double
+        if n.contains("tiny") { gb = 0.4 } else if n.contains("base") { gb = 0.6 } else if n.contains("small") { gb = 1.2 }
+        else if n.contains("medium") { gb = 2.5 } else if n.contains("distil") { gb = 1.8 } else if n.contains("turbo") { gb = 2.2 }
+        else if n.contains("large") { gb = 3.5 } else { gb = 2.0 }
+        return Int64(gb * 1_073_741_824)
+    }
+
     func refreshAvailable() async {
         isLoadingList = true
         defer { isLoadingList = false }
@@ -125,14 +135,23 @@ final class WhisperModelManager: ObservableObject {
     }
 }
 
-/// Runs WhisperKit transcription locally; loaded models are reused between jobs.
+/// Runs WhisperKit transcription locally.
+///
+/// A single WhisperKit instance is not safe for overlapping transcriptions (it holds decoder state
+/// and one progress object), so simultaneous transcriptions each borrow their own instance from a
+/// small pool. Instances are created only when needed, reused between jobs, and unloaded when the
+/// limit is lowered or the model changes. The Core ML model files on disk are shared.
 actor WhisperTranscriber: Transcribing {
-    private var pipe: WhisperKit?
-    private var loadedFolder: String?
+    private struct Instance { let pipe: WhisperKit; let folder: String }
+    private var idle: [Instance] = []
+    private var inUse = 0
     private let resolveModel: @Sendable () async -> (name: String, folder: URL, tokenizerBase: URL)?
+    private let poolLimit: @Sendable () -> Int
 
-    init(resolveModel: @escaping @Sendable () async -> (name: String, folder: URL, tokenizerBase: URL)?) {
+    init(resolveModel: @escaping @Sendable () async -> (name: String, folder: URL, tokenizerBase: URL)?,
+         poolLimit: @escaping @Sendable () -> Int = { 1 }) {
         self.resolveModel = resolveModel
+        self.poolLimit = poolLimit
     }
 
     enum TranscriberError: LocalizedError {
@@ -140,23 +159,53 @@ actor WhisperTranscriber: Transcribing {
         var errorDescription: String? { "No transcription model is downloaded. Download one in Settings → Transcription, then retry." }
     }
 
+    var loadedInstances: Int { idle.count + inUse }
+
     func unload() async {
-        await pipe?.unloadModels()
-        pipe = nil
-        loadedFolder = nil
+        for i in idle { await i.pipe.unloadModels() }
+        idle = []
+    }
+
+    private func acquire(folder: URL, tokenizerBase: URL) async throws -> Instance {
+        // Drop idle instances of a different model.
+        var keep: [Instance] = []
+        for i in idle {
+            if i.folder == folder.path { keep.append(i) } else { await i.pipe.unloadModels() }
+        }
+        idle = keep
+        inUse += 1
+        if let i = idle.popLast() { return i }
+        do {
+            let config = WhisperKitConfig(modelFolder: folder.path, tokenizerFolder: tokenizerBase, verbose: false,
+                                          logLevel: .none, prewarm: false, load: true, download: false)
+            return Instance(pipe: try await WhisperKit(config), folder: folder.path)
+        } catch {
+            inUse -= 1
+            throw error
+        }
+    }
+
+    private func release(_ i: Instance) async {
+        inUse -= 1
+        // Keep only as many loaded instances as the current limit allows (frees memory when lowered).
+        if idle.count + inUse < max(1, poolLimit()) { idle.append(i) } else { await i.pipe.unloadModels() }
     }
 
     func transcribe(audioURL: URL, language: String?, progress: @escaping @Sendable (Double) -> Void) async throws -> TranscriptionOutput {
         guard let model = await resolveModel() else { throw TranscriberError.noModel }
-        if pipe == nil || loadedFolder != model.folder.path {
-            await pipe?.unloadModels()
-            let config = WhisperKitConfig(modelFolder: model.folder.path, tokenizerFolder: model.tokenizerBase, verbose: false,
-                                          logLevel: .none, prewarm: false, load: true, download: false)
-            pipe = try await WhisperKit(config)
-            loadedFolder = model.folder.path
+        let instance = try await acquire(folder: model.folder, tokenizerBase: model.tokenizerBase)
+        do {
+            let out = try await run(instance.pipe, audioURL: audioURL, language: language, modelName: model.name, progress: progress)
+            await release(instance)
+            return out
+        } catch {
+            await release(instance)
+            throw error
         }
-        guard let pipe else { throw TranscriberError.noModel }
+    }
 
+    private func run(_ pipe: WhisperKit, audioURL: URL, language: String?, modelName: String,
+                     progress: @escaping @Sendable (Double) -> Void) async throws -> TranscriptionOutput {
         let options = DecodingOptions(verbose: false, task: .transcribe, language: language, temperature: 0,
                                       usePrefillPrompt: language != nil, detectLanguage: language == nil,
                                       skipSpecialTokens: true, withoutTimestamps: false, wordTimestamps: false,
@@ -180,14 +229,14 @@ actor WhisperTranscriber: Transcribing {
         try Task.checkCancellation()
         var segments: [TranscriptSegment] = []
         for r in results {
-            for s in r.segments {
-                segments.append(TranscriptSegment(start: Double(s.start), end: Double(s.end), text: s.text))
+            for seg in r.segments {
+                segments.append(TranscriptSegment(start: Double(seg.start), end: Double(seg.end), text: seg.text))
             }
         }
         segments.sort { $0.start < $1.start }
         progress(1)
         let lang = results.first?.language ?? language ?? "en"
-        return TranscriptionOutput(segments: segments, modelId: "whisperkit/\(model.name)", language: lang)
+        return TranscriptionOutput(segments: segments, modelId: "whisperkit/\(modelName)", language: lang)
     }
 }
 

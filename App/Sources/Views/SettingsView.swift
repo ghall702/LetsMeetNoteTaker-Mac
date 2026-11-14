@@ -374,6 +374,20 @@ struct TranscriptionSettings: View {
                 Text("Transcription runs entirely on this Mac with WhisperKit (Core ML). Models download from Hugging Face. Larger “large-v3 turbo” models are more accurate; smaller ones are faster. Audio and video are never uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Picker("Maximum simultaneous transcriptions", selection: Binding(get: { model.settings.maxConcurrentTranscriptions }, set: { v in
+                    model.updateSettings { $0.maxConcurrentTranscriptions = v }
+                    Task { await model.engine.tick() }
+                })) {
+                    ForEach(1...8, id: \.self) { n in Text(n == 1 ? "1 transcription at a time" : "\(n) simultaneous transcriptions").tag(n) }
+                }
+                memoryAdvice
+            } header: {
+                Text("Simultaneous transcriptions")
+            } footer: {
+                Text("Each simultaneous transcription loads its own copy of the model. Lessons that already have a transcript and only need OpenAI or uploading never wait for a transcription slot. Lowering the limit never stops a transcription in progress; under macOS memory pressure fewer new transcriptions are started.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Language") {
                 Picker("Spoken language", selection: Binding(get: { model.settings.transcriptionLanguage ?? "auto" }, set: { v in
                     model.updateSettings { $0.transcriptionLanguage = v == "auto" ? nil : v }
@@ -386,6 +400,28 @@ struct TranscriptionSettings: View {
         }
         .formStyle(.grouped)
         .task { await whisper.refreshAvailable() }
+    }
+}
+
+extension TranscriptionSettings {
+    @ViewBuilder var memoryAdvice: some View {
+        let name = model.transcriptionModelName ?? ""
+        let per = WhisperModelManager.estimatedMemoryBytes(name)
+        let total = per * Int64(model.settings.maxConcurrentTranscriptions)
+        let ram = Int64(ProcessInfo.processInfo.physicalMemory)
+        let gb = { (b: Int64) in String(format: "%.1f GB", Double(b) / 1_073_741_824) }
+        if model.settings.maxConcurrentTranscriptions > 1 && total > ram / 2 {
+            Label("About \(gb(total)) of memory may be needed (≈ \(gb(per)) per transcription with \(name.isEmpty ? "this model" : name)); this Mac has \(gb(ram)). This may slow your Mac or cause memory pressure — consider a lower number.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.orange)
+        } else {
+            Text("Estimated memory: about \(gb(total)) of \(gb(ram)).").font(.caption).foregroundStyle(.secondary)
+        }
+        if model.memoryPressure != .normal {
+            Label(model.memoryPressure == .critical ? "macOS reports critical memory pressure: only one new transcription is started at a time."
+                                                    : "macOS reports memory pressure: fewer new transcriptions are being started.",
+                  systemImage: "memorychip").font(.caption).foregroundStyle(.orange)
+        }
     }
 }
 
@@ -451,7 +487,7 @@ struct GeneralSettings: View {
             }
             Section("Processing") {
                 Stepper(value: Binding(get: { model.settings.maxConcurrentJobs }, set: { v in model.updateSettings { $0.maxConcurrentJobs = v } }), in: 1...4) {
-                    Text("Up to \(model.settings.maxConcurrentJobs) lesson(s) at once (transcription always runs one at a time)")
+                    Text("OpenAI and website work: up to \(model.settings.maxConcurrentJobs) lesson(s) at once (transcriptions are set in Settings → Transcription)")
                 }
                 Toggle("Pause processing", isOn: Binding(get: { model.isPaused }, set: { model.setPaused($0) }))
             }
@@ -465,6 +501,22 @@ struct GeneralSettings: View {
                 Text("Transcripts are only deleted after they have been uploaded. Temporary audio is always deleted after each job. Original Zoom recordings are never deleted.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Show Data Folder in Finder") { NSWorkspace.shared.activateFileViewerSelecting([AppInfo.supportDirectory]) }
+            }
+            Section("Data safety") {
+                let h = model.store.health
+                if let p = h.backupPath {
+                    Label("Your data was backed up before this update and checked: \((p as NSString).lastPathComponent)", systemImage: "checkmark.shield").font(.callout)
+                }
+                if h.recoveredJobs > 0 {
+                    Text("\(h.recoveredJobs) lesson(s) were set to resume from the last step already completed.").font(.caption).foregroundStyle(.secondary)
+                }
+                if let e = h.backupError ?? h.migrationError { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout) }
+                Text("Before each update the lesson history, settings, students and every saved transcript are copied to a Backups folder and verified. Backups are never deleted automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Show Backups in Finder") {
+                    let dir = model.store.backupsDirectory
+                    NSWorkspace.shared.activateFileViewerSelecting([FileManager.default.fileExists(atPath: dir.path) ? dir : model.store.directory])
+                }
             }
             Section {
                 Button("Run Setup Assistant Again") { model.showOnboarding = true; model.showMainWindow() }

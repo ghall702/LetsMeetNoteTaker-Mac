@@ -120,6 +120,17 @@ struct DashboardView: View {
 
     var attentionCard: some View {
         Card(title: "Needs attention", systemImage: "exclamationmark.triangle") {
+            if model.creditFailures.count > 1 {
+                HStack {
+                    Label("\(model.creditFailures.count) lessons are waiting for OpenAI credit. Their transcripts are saved.", systemImage: "creditcard")
+                        .font(.callout)
+                    Spacer()
+                    Link("Add Credits…", destination: JobError.openAIBillingURL)
+                    Button("Retry All \(model.creditFailures.count)") { model.retryAllCreditFailures() }.buttonStyle(.borderedProminent)
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
             ForEach(model.attentionJobs) { item in
                 let l = item.lesson, j = item.job
                 VStack(alignment: .leading, spacing: 4) {
@@ -131,6 +142,7 @@ struct DashboardView: View {
                     Text(j.error?.message ?? j.replacement?.message ?? "Needs attention").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                     HStack {
                         Button("Open") { model.openLesson(l.id) }
+                        if j.error?.kind == .openAICredits { Link("Add Credits…", destination: JobError.openAIBillingURL) }
                         if j.stage == .failed && j.error?.kind != .payloadTooLarge {
                             Button("Fix & Retry") { model.retry(j) }.buttonStyle(.borderedProminent)
                         }

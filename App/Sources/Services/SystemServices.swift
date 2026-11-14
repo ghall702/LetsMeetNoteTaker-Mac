@@ -5,6 +5,7 @@ import UserNotifications
 import AppKit
 import UniformTypeIdentifiers
 import os
+import LessonNotesCore
 
 let appLog = Logger(subsystem: "com.georgehalltuition.lessonnotes", category: "app")
 
@@ -55,6 +56,27 @@ final class NetworkMonitor: @unchecked Sendable {
     }
 
     var isOnline: Bool { lock.lock(); defer { lock.unlock() }; return online }
+}
+
+/// macOS memory pressure (normal / warning / critical) for throttling new transcriptions.
+final class MemoryPressureMonitor: @unchecked Sendable {
+    private let source = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: DispatchQueue(label: "lessonnotes.memory"))
+    private let lock = NSLock()
+    private var current: MemoryPressureLevel = .normal
+    var onChange: ((MemoryPressureLevel) -> Void)?
+
+    init() {
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            let e = self.source.data
+            let level: MemoryPressureLevel = e.contains(.critical) ? .critical : (e.contains(.warning) ? .warning : .normal)
+            self.lock.lock(); self.current = level; self.lock.unlock()
+            self.onChange?(level)
+        }
+        source.resume()
+    }
+
+    var level: MemoryPressureLevel { lock.lock(); defer { lock.unlock() }; return current }
 }
 
 /// Native notifications with a "Review" action.

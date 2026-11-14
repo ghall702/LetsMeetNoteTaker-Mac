@@ -332,10 +332,19 @@ struct JobSection: View {
             }
             if let e = job.error {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(e.kind == .payloadTooLarge ? "Needs attention" : "Error", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Label(e.kind == .payloadTooLarge ? "Needs attention" : (e.kind == .openAICredits ? "OpenAI credits needed" : "Error"),
+                          systemImage: e.kind == .openAICredits ? "creditcard" : "exclamationmark.triangle.fill").foregroundStyle(e.kind == .openAICredits ? .orange : .red)
                     Text(e.message).textSelection(.enabled)
                     Text("Occurred \(e.occurredAt.shortDateTime)" + (e.httpStatus.map { " · HTTP \($0)" } ?? "") + (e.code.map { " · \($0)" } ?? ""))
                         .font(.caption).foregroundStyle(.secondary)
+                    if e.kind == .openAICredits {
+                        HStack {
+                            Label("Transcript saved — Fix & Retry will not transcribe again", systemImage: "checkmark.shield").font(.caption).foregroundStyle(.green)
+                            Spacer()
+                            Link("Open OpenAI Billing", destination: JobError.openAIBillingURL)
+                        }
+                    }
+                    if let d = e.detail { Text("OpenAI said: \(d)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
                 }
                 .padding(8)
                 .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))

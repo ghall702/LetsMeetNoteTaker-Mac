@@ -38,6 +38,12 @@ struct MainWindow: View {
             ConfirmationSheet(request: req)
                 .environmentObject(model)
         }
+        .alert(item: $model.retryConfirmation) { c in
+            Alert(title: Text("Transcribe \(c.pupil.isEmpty ? "this lesson" : c.pupil + "'s lesson") again?"),
+                  message: Text(c.reason),
+                  primaryButton: .default(Text("Transcribe Again")) { model.confirmRetry(c) },
+                  secondaryButton: .cancel())
+        }
         .sheet(isPresented: $model.showImport) {
             ImportView(roots: model.importRoots)
                 .environmentObject(model)

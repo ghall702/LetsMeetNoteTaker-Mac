@@ -42,6 +42,13 @@ struct LessonJob: Identifiable {
     var id: UUID { job.id }
 }
 
+struct RetryConfirmation: Identifiable {
+    let id = UUID()
+    let job: Job
+    let pupil: String
+    let reason: String
+}
+
 struct ConnectionResult: Equatable {
     var ok: Bool
     var message: String
@@ -55,6 +62,7 @@ final class AppModel: ObservableObject {
     let store: LibraryStore
     let whisper: WhisperModelManager
     let network = NetworkMonitor()
+    let memoryMonitor = MemoryPressureMonitor()
     private(set) var engine: JobEngine!
     private var transcriber: WhisperTranscriber!
     private var watcher: FolderWatcher?
@@ -73,6 +81,8 @@ final class AppModel: ObservableObject {
     @Published var progress: [UUID: JobProgress] = [:]
     @Published var isOnline = true
     @Published var isPaused = false
+    @Published var memoryPressure: MemoryPressureLevel = .normal
+    @Published var retryConfirmation: RetryConfirmation?
 
     @Published var sidebar: SidebarItem? = .dashboard
     @Published var selectedLessonId: UUID?
@@ -103,7 +113,8 @@ final class AppModel: ObservableObject {
         let dir = demoMode != nil ? FileManager.default.temporaryDirectory.appendingPathComponent("LessonNotesDemo-\(UUID().uuidString)") : AppInfo.supportDirectory
         var startupError: String?
         do {
-            store = try LibraryStore(directory: dir)
+            // Real data folder: backed up and migrated recoverably on upgrade (demo uses a temp folder).
+            store = try LibraryStore(directory: dir, appVersion: demoMode == nil ? AppInfo.version : nil)
         } catch {
             // Fall back to a temporary location so the app can still report the problem.
             store = try! LibraryStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("LessonNotes-fallback"))
@@ -111,6 +122,12 @@ final class AppModel: ObservableObject {
         }
         whisper = WhisperModelManager()
         banner = startupError
+        let health = store.health
+        if let e = health.backupError ?? health.migrationError {
+            banner = e + " Your data has been left exactly as it was and processing is paused. Backups are in Settings → General → Data safety."
+        } else if !health.unreadableFiles.isEmpty {
+            banner = "Some data files could not be read (\(health.unreadableFiles.joined(separator: ", "))). They have been left untouched; processing is paused."
+        }
         if demoMode != nil { DemoData.seed(store) }
         reload()
         store.onChange = { [weak self] in
@@ -122,15 +139,16 @@ final class AppModel: ObservableObject {
 
         let store = self.store
         let whisper = self.whisper
-        transcriber = WhisperTranscriber { @Sendable in
+        transcriber = WhisperTranscriber(resolveModel: { @Sendable in
             await MainActor.run { () -> (name: String, folder: URL, tokenizerBase: URL)? in
                 let s = store.settings
                 let name = s.transcriptionModel.isEmpty ? (whisper.downloaded.keys.sorted().first ?? "") : s.transcriptionModel
                 guard let folder = whisper.folder(for: name) else { return nil }
                 return (name, folder, whisper.modelsBase)
             }
-        }
+        }, poolLimit: { @Sendable in store.settings.maxConcurrentTranscriptions })
         let net = network
+        let memory = memoryMonitor
         let deps = EngineDependencies(
             extractor: AVAudioExtractor(),
             transcriber: transcriber,
@@ -153,7 +171,8 @@ final class AppModel: ObservableObject {
                 let s = store.settings
                 return try LetsMeetClient(baseURLString: s.websiteBaseURL, apiKey: KeychainStore.get(.website) ?? "",
                                           transport: URLSessionTransport(timeout: 300))
-            })
+            },
+            memoryPressure: { memory.level })
         engine = JobEngine(store: store, deps: deps, tempRoot: AppInfo.tempAudioDirectory)
         detection = DetectionMonitor(model: self)
     }
@@ -204,6 +223,13 @@ final class AppModel: ObservableObject {
                 self.detection.rescan()
             }
         }
+        memoryMonitor.onChange = { [weak self] level in
+            Task { @MainActor in
+                self?.memoryPressure = level
+                if level == .normal { await self?.engine.tick() }
+            }
+        }
+        if store.health.readOnly { setPaused(true) }
         if !settings.onboardingCompleted {
             showOnboarding = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.showMainWindow() }
@@ -498,7 +524,28 @@ final class AppModel: ObservableObject {
 
     // MARK: Jobs
 
-    func retry(_ job: Job) { Task { await engine.retry(jobId: job.id) } }
+    /// Fix & Retry: resumes from the last completed stage. If transcription would have to be
+    /// repeated although a transcript was expected, George is told why and asked first.
+    func retry(_ job: Job) {
+        let plan = JobRecovery.retryPlan(for: job, transcriptState: store.transcriptState(jobId: job.id))
+        if case .transcribe(let reason?) = plan {
+            retryConfirmation = RetryConfirmation(job: job, pupil: store.lesson(containingJob: job.id)?.pupilName ?? "", reason: reason)
+            return
+        }
+        Task { await engine.retry(jobId: job.id) }
+    }
+
+    func confirmRetry(_ c: RetryConfirmation) {
+        retryConfirmation = nil
+        Task { await engine.retry(jobId: c.job.id) }
+    }
+
+    var creditFailures: [LessonJob] { attentionJobs.filter { $0.job.error?.kind == .openAICredits } }
+
+    /// Retries every job that failed because OpenAI credits ran out (each reuses its saved transcript).
+    func retryAllCreditFailures() {
+        for item in creditFailures { retry(item.job) }
+    }
     func cancel(_ job: Job) { Task { await engine.cancel(jobId: job.id) } }
     func start(_ job: Job) { Task { await engine.startHeld(jobId: job.id) } }
 
