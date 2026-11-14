@@ -126,9 +126,6 @@ final class AppModel: ObservableObject {
             startupError = "Could not open the data folder: \(error.localizedDescription)"
         }
         whisper = WhisperModelManager()
-        let storeForUsage = store
-        let ledger = UsageLedger(directory: store.directory)
-        usageMonitor = UsageMonitor(ledger: ledger, settings: { @Sendable in storeForUsage.settings.usage })
         banner = startupError
         let health = store.health
         if let e = health.backupError ?? health.migrationError {
@@ -137,6 +134,9 @@ final class AppModel: ObservableObject {
             banner = "Some data files could not be read (\(health.unreadableFiles.joined(separator: ", "))). They have been left untouched; processing is paused."
         }
         if demoMode != nil { DemoData.seed(store) }
+        let storeForUsage = store
+        let ledger = UsageLedger(directory: store.directory)
+        usageMonitor = UsageMonitor(ledger: ledger, settings: { @Sendable in storeForUsage.settings.usage })
         reload()
         usageMonitor.ledger.onChange = { [weak self] in
             DispatchQueue.main.async { self?.usageVersion += 1 }
