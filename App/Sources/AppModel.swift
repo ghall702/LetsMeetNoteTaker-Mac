@@ -95,7 +95,8 @@ final class AppModel: ObservableObject {
     @Published var watchError: String?
 
     private init() {
-        let dir = AppInfo.supportDirectory
+        let demoMode = DemoData.mode
+        let dir = demoMode != nil ? FileManager.default.temporaryDirectory.appendingPathComponent("LessonNotesDemo-\(UUID().uuidString)") : AppInfo.supportDirectory
         var startupError: String?
         do {
             store = try LibraryStore(directory: dir)
@@ -106,6 +107,7 @@ final class AppModel: ObservableObject {
         }
         whisper = WhisperModelManager()
         banner = startupError
+        if demoMode != nil { DemoData.seed(store) }
         reload()
         store.onChange = { [weak self] in
             DispatchQueue.main.async { self?.scheduleReload() }
@@ -150,6 +152,10 @@ final class AppModel: ObservableObject {
     // MARK: Startup
 
     func start() {
+        if let demo = DemoData.mode {
+            startDemo(demo)
+            return
+        }
         NotificationService.shared.configure()
         NotificationService.shared.onReview = { [weak self] path in self?.openDetection(folderPath: path) }
         NotificationService.shared.onOpenLesson = { [weak self] id in self?.openLesson(id) }
@@ -192,6 +198,25 @@ final class AppModel: ObservableObject {
         if !settings.onboardingCompleted {
             showOnboarding = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.showMainWindow() }
+        }
+    }
+
+    /// Screenshot/demo mode: processing paused, no network, no folder watching.
+    private func startDemo(_ demo: String) {
+        isPaused = true
+        Task { await engine.setPaused(true) }
+        progress = Dictionary(uniqueKeysWithValues: activeJobs.map { ($0.job.id, JobProgress(fraction: 0.42, message: "Transcribing (part 1 of 2)")) })
+        switch demo {
+        case "history": sidebar = .history; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
+        case "students": sidebar = .students
+        case "settings": sidebar = .settings
+        case "onboarding": showOnboarding = true
+        default: sidebar = .dashboard
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            self.showMainWindow()
+            if demo == "review", let d = self.detections.first { self.openDetection(folderPath: d.folderPath) }
         }
     }
 
