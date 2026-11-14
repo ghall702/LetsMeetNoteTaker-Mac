@@ -108,6 +108,8 @@ Audio and video never leave the Mac.
 - Automatic retries with back-off; safe, idempotent uploads
 - Duplicate-recording warnings using SHA-256
 - Full transcript always uploaded, with UTF-8 size limits enforced
+- **OpenAI usage counter** with optional free-allowance protection
+- Lesson length sent to Let's Meet (admin-only)
 
 </td>
 </tr>
@@ -127,6 +129,9 @@ Audio and video never leave the Mac.
 <tr>
 <td><img src="docs/images/settings-light.jpg" alt="OpenAI settings"><br><sub><b>OpenAI</b> — live model list, Test Model and reasoning effort</sub></td>
 <td><img src="docs/images/dashboard-dark.jpg" alt="Dark mode"><br><sub><b>Dark mode</b> — follows your Mac's appearance</sub></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><img src="docs/images/usage-light.jpg" width="70%" alt="API usage"><br><sub><b>API Usage</b> — today's tokens against the complimentary allowance, reset countdown, estimated spend and the lessons using the most</sub></td>
 </tr>
 </table>
 
