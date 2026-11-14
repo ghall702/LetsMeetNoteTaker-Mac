@@ -39,10 +39,11 @@ enum DemoData {
                                     customPrompt: "You write revision-focused notes for a GCSE English Language pupil. Refer to assessment objectives AO1–AO6 where relevant.")
         daniel.rules = [MatchRule(kind: .meetingNameContains, value: "Daniel")]
         store.updateModelList {
-            $0.models = [OpenAIModelInfo(id: "example-model", created: 1_790_000_000), OpenAIModelInfo(id: "example-model-mini", created: 1_785_000_000),
-                         OpenAIModelInfo(id: "example-reasoning-model", created: 1_780_000_000)]
+            $0.models = [OpenAIModelInfo(id: "gpt-5", created: 1_754_000_000), OpenAIModelInfo(id: "gpt-5-mini", created: 1_754_000_000),
+                         OpenAIModelInfo(id: "gpt-4.1", created: 1_744_000_000), OpenAIModelInfo(id: "o4-mini", created: 1_744_000_000),
+                         OpenAIModelInfo(id: "text-embedding-3-large", created: 1_705_000_000)]
             $0.fetchedAt = Date()
-            $0.verifications["example-model"] = ModelVerification(modelId: "example-model", testedAt: Date(), structuredOutputWorks: true,
+            $0.verifications["gpt-5-mini"] = ModelVerification(modelId: "gpt-5-mini", testedAt: Date(), structuredOutputWorks: true,
                                                                   reasoningEffortTested: .modelDefault, reasoningEffortAccepted: nil,
                                                                   message: "Success — the model returned valid lesson-notes JSON (title: “The water cycle”).", elapsedSeconds: 4.2)
         }
@@ -50,7 +51,7 @@ enum DemoData {
         store.upsertMapping(daniel)
         store.updateSettings {
             $0.onboardingCompleted = mode != "onboarding"
-            $0.openAIModel = "example-model"
+            $0.openAIModel = "gpt-5-mini"
             $0.transcriptionModel = ""
         }
         var s = store.settings
@@ -82,7 +83,7 @@ enum DemoData {
                                    privateNotes: "Still muddles numerator and denominator under pressure.")
         if var l = lesson("Ellie", ellieRoom, ellie, daysAgo: 1, mode: .single, n: 1) {
             l.jobs[0].stage = .submitted; l.jobs[0].remoteStatus = .published; l.jobs[0].notes = notes; l.jobs[0].noteId = "7487e543-demo"
-            l.jobs[0].submittedAt = now.addingTimeInterval(-80_000); l.jobs[0].remoteCheckedAt = now; l.jobs[0].summaryModel = "example-model"
+            l.jobs[0].submittedAt = now.addingTimeInterval(-80_000); l.jobs[0].remoteCheckedAt = now; l.jobs[0].summaryModel = "gpt-5-mini"
             l.jobs[0].transcriptionModel = "whisperkit/openai_whisper-large-v3-v20240930_turbo"
             l.jobs[0].promptSnapshot = PromptResolver.resolve(globalPrompt: s.globalPrompt, mapping: ellie)
             var draftNotes = notes
@@ -91,8 +92,8 @@ enum DemoData {
             draftNotes.learningContent += "\n\n## Simplifying\nDivide the numerator and denominator by their highest common factor."
             l.jobs[0].remoteVersion = 2
             l.jobs[0].noteVersions = [
-                NoteVersion(createdAt: now.addingTimeInterval(-80_000), kind: .original, state: .current, notes: notes, model: "example-model", websiteVersion: 2),
-                NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: draftNotes, model: "example-model", effort: .high, promptSource: .global,
+                NoteVersion(createdAt: now.addingTimeInterval(-80_000), kind: .original, state: .current, notes: notes, model: "gpt-5-mini", websiteVersion: 2),
+                NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: draftNotes, model: "gpt-5-mini", effort: .high, promptSource: .global,
                             additionalInstructions: "Add a section on simplifying.", baseVersion: 2)]
             store.addLesson(l)
             try? store.saveTranscript(StoredTranscript(jobId: l.jobs[0].id, savedAt: now, model: "whisperkit/openai_whisper-large-v3-v20240930_turbo", language: "en",
@@ -103,7 +104,7 @@ enum DemoData {
         }
         if var l = lesson("Daniel", danielRoom, daniel, daysAgo: 0.2, mode: .combined, n: 2) {
             var n2 = notes; n2.title = "Language Paper 1, Question 4: evaluating a text"
-            l.jobs[0].stage = .submitted; l.jobs[0].remoteStatus = .pending; l.jobs[0].notes = n2; l.jobs[0].submittedAt = now; l.jobs[0].summaryModel = "example-model"
+            l.jobs[0].stage = .submitted; l.jobs[0].remoteStatus = .pending; l.jobs[0].notes = n2; l.jobs[0].submittedAt = now; l.jobs[0].summaryModel = "gpt-5-mini"
             store.addLesson(l)
         }
         if var l = lesson("Ellie", ellieRoom, ellie, daysAgo: 3, mode: .single, n: 1) {
