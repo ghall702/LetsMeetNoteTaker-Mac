@@ -105,10 +105,13 @@ public struct NoteSubmission: Codable, Sendable, Equatable {
     public var recordings: [SubmissionRecording]
     public var mode: ProcessingMode
     public var generator: SubmissionGenerator?
+    /// Lesson length in whole seconds (1–43,200), admin-only on the website. nil = unknown (omitted).
+    public var lessonLength: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case submissionId = "submission_id", roomId = "room_id", lessonDate = "lesson_date", startedAt = "started_at",
-             endedAt = "ended_at", title, summary, transcript, privateNotes = "private_notes", recordings, mode, generator
+             endedAt = "ended_at", title, summary, transcript, privateNotes = "private_notes", recordings, mode, generator,
+             lessonLength = "lesson_length"
     }
 
     public init(submissionId: String, roomId: String, lessonDate: String, startedAt: String?, endedAt: String?, title: String,
@@ -142,6 +145,7 @@ public struct NoteSubmission: Codable, Sendable, Equatable {
         try c.encode(recordings, forKey: .recordings)
         try c.encode(mode, forKey: .mode)
         try c.encodeIfPresent(generator, forKey: .generator)
+        try c.encodeIfPresent(lessonLength, forKey: .lessonLength)
     }
 
     /// Canonical JSON body.
@@ -167,15 +171,18 @@ public struct NoteStatusResponse: Codable, Sendable, Equatable {
     public var replayed: Bool?
     /// Content version (integer, increments on every content change). Base for replacements.
     public var version: Int?
+    /// Lesson length (seconds) as stored on the website.
+    public var lessonLength: Int?
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id", submissionId = "submission_id", roomId = "room_id", status, createdAt = "created_at",
-             updatedAt = "updated_at", publishedAt = "published_at", replayed, version
+             updatedAt = "updated_at", publishedAt = "published_at", replayed, version, lessonLength = "lesson_length"
     }
 
     public init(noteId: String?, submissionId: String, roomId: String? = nil, status: NoteStatus, createdAt: String? = nil,
-                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil, version: Int? = nil) {
+                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil, version: Int? = nil, lessonLength: Int? = nil) {
         self.version = version
+        self.lessonLength = lessonLength
         self.noteId = noteId
         self.submissionId = submissionId
         self.roomId = roomId
@@ -263,10 +270,11 @@ public struct NoteReplaceResponse: Codable, Sendable, Equatable {
     public var fieldsChanged: [String]?
     public var previousStatus: NoteStatus?
     public var replayed: Bool?
+    public var lessonLength: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id", submissionId = "submission_id", status, version, updatedAt = "updated_at", publishedAt = "published_at",
-             fieldsChanged = "fields_changed", previousStatus = "previous_status", replayed
+             fieldsChanged = "fields_changed", previousStatus = "previous_status", replayed, lessonLength = "lesson_length"
     }
 
     public init(noteId: String?, submissionId: String?, status: NoteStatus, version: Int?, updatedAt: String? = nil, publishedAt: String? = nil,
@@ -285,4 +293,41 @@ public struct NoteReplaceResponse: Codable, Sendable, Equatable {
 
 public struct APIErrorEnvelope: Codable, Sendable {
     public var error: APIErrorBody
+}
+
+/// Lesson length rules (website API): whole seconds, 1–43,200 (12 hours), or null.
+public enum LessonLength {
+    public static let maxSeconds = 43_200
+
+    public static func isValid(_ v: Int?) -> Bool { v.map { (1...maxSeconds).contains($0) } ?? true }
+
+    /// Total of the job's recording durations; falls back to ended − started. nil when unknown or out of range.
+    public static func seconds(for lesson: Lesson, job: Job) -> Int? {
+        let recs = lesson.recordings(for: job)
+        var total = recs.reduce(0) { $0 + max(0, $1.durationSec) }
+        if total <= 0, lesson.mode != .separate, let s = lesson.startedAt, let e = lesson.endedAt {
+            total = Int(e.timeIntervalSince(s).rounded())
+        }
+        guard total >= 1 else { return nil }
+        return min(total, maxSeconds)
+    }
+}
+
+/// Response of `PATCH /notes/{id}/lesson-length`.
+public struct LessonLengthResponse: Codable, Sendable, Equatable {
+    public var noteId: String?
+    public var submissionId: String?
+    public var status: NoteStatus?
+    public var lessonLength: Int?
+    public var unchanged: Bool?
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id", submissionId = "submission_id", status, lessonLength = "lesson_length", unchanged
+    }
+    public init(noteId: String?, submissionId: String?, status: NoteStatus?, lessonLength: Int?, unchanged: Bool?) {
+        self.noteId = noteId
+        self.submissionId = submissionId
+        self.status = status
+        self.lessonLength = lessonLength
+        self.unchanged = unchanged
+    }
 }

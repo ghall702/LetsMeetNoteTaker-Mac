@@ -158,6 +158,13 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var replacement: PendingReplacement?
     /// Anything changed to fit the website limits when the current notes were generated.
     public var notesAdjustments: [String]?
+    // Added in 1.4: lesson length sync (website `lesson_length`, seconds).
+    /// Value the website is known to hold (from a submission or the lesson-length endpoint).
+    public var lessonLengthSynced: Int?
+    public var lessonLengthNextAttemptAt: Date?
+    public var lessonLengthAttempts: Int?
+    /// Set when the website rejected the value (not retried automatically).
+    public var lessonLengthError: String?
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

@@ -74,6 +74,7 @@ public enum SubmissionValidator {
             add("transcript", "is missing — the full transcript must be uploaded")
         }
         checkString("private_notes", n.privateNotes, 10_000)
+        if !LessonLength.isValid(n.lessonLength) { add("lesson_length", "must be a whole number of seconds from 1 to \(LessonLength.maxSeconds)") }
         if n.recordings.count > 20 { add("recordings", "must have at most 20 items") }
         for (i, r) in n.recordings.enumerated() {
             if r.filename.isEmpty || utf16Count(r.filename) > 260 { add("recordings.\(i).filename", "must be 1–260 characters") }

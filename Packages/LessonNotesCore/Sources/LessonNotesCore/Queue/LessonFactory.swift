@@ -119,7 +119,7 @@ public enum SubmissionBuilder {
                                 order: i, sha256: r.sha256)
         }
         let clean = NotesSchema.sanitise(notes)
-        return NoteSubmission(
+        var submission = NoteSubmission(
             submissionId: job.submissionId, roomId: lesson.roomId, lessonDate: lesson.lessonDate,
             startedAt: started.map { CoreFormat.iso8601($0, timeZone: tz) },
             endedAt: ended.map { CoreFormat.iso8601($0, timeZone: tz) },
@@ -130,5 +130,7 @@ public enum SubmissionBuilder {
             generator: SubmissionGenerator(appVersion: String(appVersion.prefix(100)),
                                            transcriptionModel: String(transcriptionModel.prefix(100)),
                                            summaryModel: String(summaryModel.prefix(100))))
+        submission.lessonLength = LessonLength.seconds(for: lesson, job: job)
+        return submission
     }
 }

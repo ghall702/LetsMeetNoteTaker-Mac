@@ -54,6 +54,13 @@ public protocol NoteReplacing: Sendable {
 
 extension LetsMeetClient: NoteReplacing {}
 
+/// `PATCH /notes/{id}/lesson-length` (admin-only length; no content, version or status change).
+public protocol LessonLengthSetting: Sendable {
+    func setLessonLength(noteId: String, seconds: Int?) async throws -> LessonLengthResponse
+}
+
+extension LetsMeetClient: LessonLengthSetting {}
+
 /// Real notes producer: OpenAI Responses API with the model chosen in Settings.
 public struct OpenAINotesProducer: NotesProducing {
     public var generator: NotesGenerator
@@ -75,11 +82,14 @@ public struct EngineDependencies: Sendable {
     public var makeReplacer: (@Sendable () throws -> NoteReplacing)?
     /// macOS memory pressure (the app wires this to a DispatchSource); reduces new transcriptions.
     public var memoryPressure: @Sendable () -> MemoryPressureLevel
+    public var makeLessonLengthSetter: (@Sendable () throws -> LessonLengthSetting)?
 
     public init(extractor: AudioExtracting, transcriber: Transcribing, makeNotesProducer: @escaping @Sendable () throws -> NotesProducing,
                 makeSubmitter: @escaping @Sendable () throws -> NoteSubmitting, isOnline: @escaping @Sendable () -> Bool, appVersion: String,
                 makeReplacer: (@Sendable () throws -> NoteReplacing)? = nil,
-                memoryPressure: @escaping @Sendable () -> MemoryPressureLevel = { .normal }) {
+                memoryPressure: @escaping @Sendable () -> MemoryPressureLevel = { .normal },
+                makeLessonLengthSetter: (@Sendable () throws -> LessonLengthSetting)? = nil) {
+        self.makeLessonLengthSetter = makeLessonLengthSetter
         self.makeReplacer = makeReplacer
         self.memoryPressure = memoryPressure
         self.extractor = extractor
@@ -141,8 +151,13 @@ public actor JobEngine {
     private var eventHandler: (@Sendable (EngineEvent) -> Void)?
     public private(set) var isPaused = false
 
+    /// Seconds between lesson-length requests (keeps well under the 60 requests/minute limit).
+    let lessonLengthPacing: TimeInterval
+    private var lessonLengthTask: Task<Void, Never>?
+
     public init(store: LibraryStore, deps: EngineDependencies, tempRoot: URL, retryPolicy: RetryPolicy = RetryPolicy(),
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() }, lessonLengthPacing: TimeInterval = 1.5) {
+        self.lessonLengthPacing = lessonLengthPacing
         self.store = store
         self.deps = deps
         self.tempRoot = tempRoot
@@ -275,6 +290,12 @@ public actor JobEngine {
                 }
             }
         }
+        if online && lessonLengthTask == nil && deps.makeLessonLengthSetter != nil && !dueLessonLengths(now: t).isEmpty {
+            lessonLengthTask = Task { [weak self] in
+                await self?.syncLessonLengths()
+                await self?.lessonLengthFinished()
+            }
+        }
         if running.isEmpty { emit(.idle) }
     }
 
@@ -289,7 +310,7 @@ public actor JobEngine {
     public func runUntilIdle(maxRounds: Int = 200) async {
         for _ in 0..<maxRounds {
             tick()
-            let tasks = Array(running.values)
+            let tasks = Array(running.values) + (lessonLengthTask.map { [$0] } ?? [])
             if tasks.isEmpty { return }
             for t in tasks { await t.value }
         }
@@ -588,6 +609,7 @@ public actor JobEngine {
             $0.noteId = response.noteId
             $0.remoteStatus = response.status
             $0.remoteVersion = response.version ?? $0.remoteVersion
+            if let len = response.lessonLength { $0.lessonLengthSynced = len }
             $0.replayed = response.replayed
             $0.remoteUpdatedAt = response.updatedAt
             $0.submittedAt = now()
@@ -601,6 +623,73 @@ public actor JobEngine {
             $0.completedStagesAt["submitted"] = now()
         }
         emit(.submitted(jobId: job.id))
+    }
+}
+
+// MARK: Lesson length sync (admin-only `lesson_length`)
+
+extension JobEngine {
+    struct LessonLengthItem { let jobId: UUID; let ref: String; let seconds: Int }
+
+    /// Submitted notes (including those from before 1.3) whose website lesson length is not yet
+    /// known to match the recordings' total duration.
+    func dueLessonLengths(now t: Date) -> [LessonLengthItem] {
+        store.allLessons.flatMap { l in
+            l.jobs.compactMap { j -> LessonLengthItem? in
+                guard j.stage == .submitted, j.remoteStatus != .deleted, j.lessonLengthError == nil,
+                      (j.lessonLengthNextAttemptAt ?? .distantPast) <= t,
+                      let secs = LessonLength.seconds(for: l, job: j), j.lessonLengthSynced != secs else { return nil }
+                return LessonLengthItem(jobId: j.id, ref: j.submissionId, seconds: secs)
+            }
+        }
+    }
+
+    func lessonLengthFinished() { lessonLengthTask = nil }
+
+    /// Sends lesson lengths one at a time with the dedicated endpoint — the notes themselves are
+    /// never resent, and status/version are unchanged on the website.
+    func syncLessonLengths() async {
+        guard let make = deps.makeLessonLengthSetter, let setter = try? make() else { return }
+        for item in dueLessonLengths(now: now()) {
+            guard deps.isOnline(), !Task.isCancelled else { return }
+            do {
+                let r = try await setter.setLessonLength(noteId: item.ref, seconds: item.seconds)
+                store.updateJob(id: item.jobId, now: now()) { j in
+                    j.lessonLengthSynced = r.lessonLength ?? item.seconds
+                    j.lessonLengthAttempts = nil
+                    j.lessonLengthNextAttemptAt = nil
+                    if let s = r.status { j.remoteStatus = s }
+                }
+            } catch let e as LetsMeetAPIError {
+                switch e.httpStatus {
+                case 404:
+                    store.updateJob(id: item.jobId, now: now()) { $0.remoteStatus = .deleted }
+                case 422, 400:
+                    store.updateJob(id: item.jobId, now: now()) { $0.lessonLengthError = e.localizedDescription }
+                case 429:
+                    lessonLengthBackoff(item.jobId, retryAfter: e.retryAfter)
+                    return // rate limited: stop this pass
+                case 401, 403:
+                    lessonLengthBackoff(item.jobId, retryAfter: 3600)
+                    return // key problem: try again later
+                default:
+                    lessonLengthBackoff(item.jobId, retryAfter: e.retryAfter)
+                }
+            } catch {
+                lessonLengthBackoff(item.jobId, retryAfter: nil)
+                return
+            }
+            if lessonLengthPacing > 0 { try? await Task.sleep(nanoseconds: UInt64(lessonLengthPacing * 1_000_000_000)) }
+        }
+    }
+
+    private func lessonLengthBackoff(_ jobId: UUID, retryAfter: TimeInterval?) {
+        let t = now()
+        store.updateJob(id: jobId, now: t) { j in
+            let n = (j.lessonLengthAttempts ?? 0) + 1
+            j.lessonLengthAttempts = n
+            j.lessonLengthNextAttemptAt = t.addingTimeInterval(max(retryAfter ?? 0, RetryPolicy.baseDelay(forAttempt: n)))
+        }
     }
 }
 
@@ -737,6 +826,7 @@ extension JobEngine {
             if let r = response {
                 j.remoteStatus = r.status
                 if let v = r.version { j.remoteVersion = v }
+                if let len = r.lessonLength { j.lessonLengthSynced = len }
                 if let n = r.noteId { j.noteId = n }
                 j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
                 if r.status != .published { j.publishedAt = nil }
@@ -799,6 +889,7 @@ public enum StatusSync {
                 j.remoteCheckedAt = now
                 if let nid = r.noteId { j.noteId = nid }
                 if let v = r.version { j.remoteVersion = v }
+                if let len = r.lessonLength { j.lessonLengthSynced = len }
                 j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
                 if r.status == .published {
                     j.publishedAt = r.publishedAt.flatMap(CoreFormat.parseISO8601) ?? j.publishedAt ?? now

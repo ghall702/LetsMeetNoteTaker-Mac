@@ -361,6 +361,7 @@ struct JobSection: View {
                     row("Website status", (job.remoteStatus ?? .pending).label + (job.remoteCheckedAt.map { " (checked \($0.shortDateTime))" } ?? ""))
                 }
                 if let s = job.submittedAt { row("Submitted", s.shortDateTime + (job.replayed == true ? " (already received)" : "")) }
+                row("Lesson length", lessonLengthText)
                 row("Transcription model", job.transcriptionModel ?? "—")
                 row("OpenAI model", (job.summaryModel ?? "—") + (job.reasoningEffort.flatMap { $0 == .modelDefault ? nil : " · effort \($0.label)" } ?? ""))
                 if let p = job.promptSnapshot { row("Prompt", p.source == .custom ? "Student's custom prompt" : "Global default prompt") }
@@ -489,6 +490,17 @@ struct JobSection: View {
         case .submitted:
             Button("Check Status") { Task { await model.syncStatuses(force: true) } }
         }
+    }
+
+    var lessonLengthText: String {
+        guard let secs = LessonLength.seconds(for: lesson, job: job) else { return "Unknown" }
+        let h = secs / 3600, m = (secs % 3600) / 60, sec = secs % 60
+        var text = h > 0 ? "\(h) h \(m) min" : (m > 0 ? "\(m) min" + (sec > 0 ? " \(sec) s" : "") : "\(sec) s")
+        guard job.stage == .submitted else { return text }
+        if job.lessonLengthSynced == secs { text += " · on website" }
+        else if job.lessonLengthError != nil { text += " · website rejected it" }
+        else if job.remoteStatus != .deleted { text += " · sending to website…" }
+        return text
     }
 
     func row(_ k: String, _ v: String) -> some View {

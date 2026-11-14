@@ -164,6 +164,17 @@ public struct LetsMeetClient: Sendable {
         return try await perform(makeRequest("notes/\(safe)", method: "PATCH", body: body), as: NoteReplaceResponse.self).0
     }
 
+    /// `PATCH /notes/{note_id or submission_id}/lesson-length` — sets only the admin-only lesson
+    /// length. Does not change the note's content, version or status.
+    public func setLessonLength(noteId: String, seconds: Int?) async throws -> LessonLengthResponse {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))
+        let safe = noteId.addingPercentEncoding(withAllowedCharacters: allowed) ?? noteId
+        let body: Data
+        if let seconds { body = try JSONSerialization.data(withJSONObject: ["lesson_length": seconds]) }
+        else { body = Data(#"{"lesson_length":null}"#.utf8) }
+        return try await perform(makeRequest("notes/\(safe)/lesson-length", method: "PATCH", body: body), as: LessonLengthResponse.self).0
+    }
+
     /// `GET /notes/{id}`; a 404 means the note was deleted (or never existed).
     public func status(of id: String) async throws -> NoteStatusResponse {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))

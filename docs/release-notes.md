@@ -8,7 +8,12 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.3
+### What's in 1.4
+- **Lesson length on Let's Meet:** every new note now includes `lesson_length` (total recording time in whole seconds, capped at 12 hours; left out when unknown). Visible only to you in Admin Tools.
+- **Existing notes backfilled automatically:** for notes already sent by earlier versions, the app quietly sets just the lesson length on the website, one at a time in the background. The notes themselves are **not** resent — their content, version and approval status stay exactly as they are. Notes deleted on the website are marked as such; rate limits are respected.
+- History shows each lesson's length and whether it is on the website.
+
+### Also in 1.3
 - **OpenAI usage counter:** Dashboard panel, menu bar line and a new **API Usage** page — tokens used today (UTC), the 250,000 complimentary allowance, estimated remaining, time to the 00:00 UTC reset, lessons today, and estimated spending today and this month, with green/amber/red indicators.
 - **Per-lesson usage:** input, cached input, output and total tokens exactly as reported by OpenAI, plus a clearly labelled cost estimate.
 - **Free allowance protection (optional):** before each request the app counts input tokens with OpenAI, adds the maximum output and a safety margin, and holds the lesson until after 00:00 UTC if it might not fit. A local safeguard, not an OpenAI billing cap.

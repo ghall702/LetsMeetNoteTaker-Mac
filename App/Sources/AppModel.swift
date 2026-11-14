@@ -185,7 +185,12 @@ final class AppModel: ObservableObject {
                 return try LetsMeetClient(baseURLString: s.websiteBaseURL, apiKey: KeychainStore.get(.website) ?? "",
                                           transport: URLSessionTransport(timeout: 300))
             },
-            memoryPressure: { memory.level })
+            memoryPressure: { memory.level },
+            makeLessonLengthSetter: { @Sendable in
+                // Backfills lesson length on notes already on the website; never resends the notes.
+                guard let key = KeychainStore.get(.website), !key.isEmpty else { throw LetsMeetClientError.missingKey }
+                return try LetsMeetClient(baseURLString: store.settings.websiteBaseURL, apiKey: key, transport: URLSessionTransport(timeout: 60))
+            })
         engine = JobEngine(store: store, deps: deps, tempRoot: AppInfo.tempAudioDirectory)
         detection = DetectionMonitor(model: self)
     }
