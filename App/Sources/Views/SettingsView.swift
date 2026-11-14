@@ -5,14 +5,14 @@ import LessonNotesCore
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
-        TabView {
-            WebsiteSettings().tabItem { Label("Website", systemImage: "globe") }
-            OpenAISettings().tabItem { Label("OpenAI", systemImage: "sparkles") }
-            PromptSettings().tabItem { Label("Prompt", systemImage: "text.quote") }
-            TranscriptionSettings().tabItem { Label("Transcription", systemImage: "waveform") }
-            RecordingSettings().tabItem { Label("Recordings", systemImage: "video") }
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            PrivacyInfo().tabItem { Label("Privacy", systemImage: "lock.shield") }
+        TabView(selection: $model.settingsTab) {
+            WebsiteSettings().tabItem { Label("Website", systemImage: "globe") }.tag(0)
+            OpenAISettings().tabItem { Label("OpenAI", systemImage: "sparkles") }.tag(1)
+            PromptSettings().tabItem { Label("Prompt", systemImage: "text.quote") }.tag(2)
+            TranscriptionSettings().tabItem { Label("Transcription", systemImage: "waveform") }.tag(3)
+            RecordingSettings().tabItem { Label("Recordings", systemImage: "video") }.tag(4)
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag(5)
+            PrivacyInfo().tabItem { Label("Privacy", systemImage: "lock.shield") }.tag(6)
         }
         .padding(12)
         .navigationTitle("Settings")

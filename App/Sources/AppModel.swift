@@ -83,6 +83,8 @@ final class AppModel: ObservableObject {
     @Published var banner: String?
     /// Screenshot mode only: open the draft review sheet automatically.
     @Published var demoReviewDraft = false
+    @Published var demoSelectFirstStudent = false
+    @Published var settingsTab = 0
 
     @Published var hasWebsiteKey = false
     @Published var hasOpenAIKey = false
@@ -215,15 +217,22 @@ final class AppModel: ObservableObject {
         progress = Dictionary(uniqueKeysWithValues: activeJobs.map { ($0.job.id, JobProgress(fraction: 0.42, message: "Transcribing (part 1 of 2)")) })
         switch demo {
         case "history", "regenerate": sidebar = .history; demoReviewDraft = demo == "regenerate"; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
-        case "students": sidebar = .students
-        case "settings": sidebar = .settings
+        case "students": sidebar = .students; demoSelectFirstStudent = true
+        case "settings": sidebar = .settings; settingsTab = 1
         case "onboarding": showOnboarding = true
         default: sidebar = .dashboard
+        }
+        if let look = ProcessInfo.processInfo.environment["LESSONNOTES_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: look == "dark" ? .darkAqua : .aqua)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self else { return }
             self.showMainWindow()
             if demo == "review", let d = self.detections.first { self.openDetection(folderPath: d.folderPath) }
+        }
+        // Screenshot helper: size the main window and publish its frame so CI can crop to it.
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in DemoData.layoutAndPublishWindowFrame() }
         }
     }
 

@@ -62,6 +62,12 @@ struct StudentsView: View {
             .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Students")
+        .onAppear {
+            if model.demoSelectFirstStudent, let first = model.mappings.first(where: { $0.promptMode == .custom }) ?? model.mappings.first {
+                model.demoSelectFirstStudent = false
+                selection = first.id
+            }
+        }
         .toolbar {
             ToolbarItem {
                 Button { Task { await model.refreshRooms() } } label: {

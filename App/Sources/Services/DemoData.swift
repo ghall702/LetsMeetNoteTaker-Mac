@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import LessonNotesCore
 
 /// Sample data used only when the app is launched with the `LESSONNOTES_DEMO` environment
@@ -6,6 +7,27 @@ import LessonNotesCore
 /// real data, keys or the website.
 enum DemoData {
     static var mode: String? { ProcessInfo.processInfo.environment["LESSONNOTES_DEMO"] }
+
+    private static var sized = false
+
+    /// Sizes the main window once and writes its on-screen frame (top-left origin, points)
+    /// to the app's temporary folder for the screenshot workflow to crop to.
+    @MainActor static func layoutAndPublishWindowFrame() {
+        guard let w = NSApp.windows.first(where: { $0.isVisible && $0.sheetParent == nil && !($0 is NSPanel) && $0.frame.width > 500 && $0.styleMask.contains(.titled) }),
+              let screen = w.screen ?? NSScreen.main else { return }
+        if !sized {
+            sized = true
+            let size = NSSize(width: min(1280, screen.visibleFrame.width - 40), height: min(820, screen.visibleFrame.height - 40))
+            let origin = NSPoint(x: screen.visibleFrame.midX - size.width / 2, y: screen.visibleFrame.midY - size.height / 2)
+            w.setFrame(NSRect(origin: origin, size: size), display: true)
+        }
+        let f = w.frame
+        let info: [String: Double] = ["x": f.minX - screen.frame.minX, "y": screen.frame.maxY - f.maxY, "w": f.width, "h": f.height,
+                                      "sw": screen.frame.width, "sh": screen.frame.height]
+        if let data = try? JSONSerialization.data(withJSONObject: info) {
+            try? data.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("lessonnotes-window.json"))
+        }
+    }
 
     static func seed(_ store: LibraryStore) {
         let ellieRoom = "3ae368a1b979e5f6e0aba39d3103b7e1", danielRoom = "fb01c9b1eef909f27d1d49a6b1a1c9e3"
@@ -16,6 +38,14 @@ enum DemoData {
                                     context: "GCSE English Language", promptMode: .custom,
                                     customPrompt: "You write revision-focused notes for a GCSE English Language pupil. Refer to assessment objectives AO1–AO6 where relevant.")
         daniel.rules = [MatchRule(kind: .meetingNameContains, value: "Daniel")]
+        store.updateModelList {
+            $0.models = [OpenAIModelInfo(id: "example-model", created: 1_790_000_000), OpenAIModelInfo(id: "example-model-mini", created: 1_785_000_000),
+                         OpenAIModelInfo(id: "example-reasoning-model", created: 1_780_000_000)]
+            $0.fetchedAt = Date()
+            $0.verifications["example-model"] = ModelVerification(modelId: "example-model", testedAt: Date(), structuredOutputWorks: true,
+                                                                  reasoningEffortTested: .modelDefault, reasoningEffortAccepted: nil,
+                                                                  message: "Success — the model returned valid lesson-notes JSON (title: “The water cycle”).", elapsedSeconds: 4.2)
+        }
         store.upsertMapping(ellie)
         store.upsertMapping(daniel)
         store.updateSettings {
