@@ -303,7 +303,10 @@ final class AppModel: ObservableObject {
         return whisper.downloaded.keys.sorted().first
     }
 
+    var isDemo: Bool { DemoData.mode != nil }
+
     var setupIssues: [String] {
+        if isDemo { return [] }
         var issues: [String] = []
         if !hasWebsiteKey { issues.append("Add your Let's Meet website API key") }
         if !hasOpenAIKey { issues.append("Add your OpenAI API key") }

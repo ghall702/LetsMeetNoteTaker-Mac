@@ -17,7 +17,7 @@ struct MainWindow: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
                     if !model.isOnline { Label("Offline", systemImage: "wifi.slash").foregroundStyle(.orange) }
-                    if model.isPaused { Label("Processing paused", systemImage: "pause.circle").foregroundStyle(.orange) }
+                    if model.isPaused && !model.isDemo { Label("Processing paused", systemImage: "pause.circle").foregroundStyle(.orange) }
                     Text("Version \(AppInfo.version)").foregroundStyle(.tertiary)
                 }
                 .font(.caption)

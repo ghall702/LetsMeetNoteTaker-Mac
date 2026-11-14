@@ -148,18 +148,9 @@ struct OpenAISettings: View {
                     .disabled(!model.hasOpenAIKey || model.isRefreshingModels)
                 }
                 if let e = model.modelsError { Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.caption) }
-                List(filteredModels, selection: Binding<String?>(get: { model.settings.openAIModel }, set: { id in
-                    if let id { model.updateSettings { $0.openAIModel = id } }
-                })) { m in
-                    HStack {
-                        Text(m.id).font(.body.monospaced())
-                        Spacer()
-                        if let v = model.modelList.verifications[m.id] {
-                            StatusChip(v.structuredOutputWorks ? "Tested ✓" : "Test failed", color: v.structuredOutputWorks ? .green : .red)
-                        }
-                        if let c = m.created { Text(Date(timeIntervalSince1970: TimeInterval(c)).formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary) }
-                    }
-                    .tag(m.id)
+                ModelPickerList(models: filteredModels, selected: model.settings.openAIModel,
+                                verifications: model.modelList.verifications) { id in
+                    model.updateSettings { $0.openAIModel = id }
                 }
                 .frame(height: 200)
                 Text(model.modelList.fetchedAt.map { "\(model.modelList.models.count) models on your account · list updated \($0.shortDateTime) (cached for offline use)" } ?? "Save your key and press Refresh Models to load the models available to your account.")
@@ -237,6 +228,52 @@ struct OpenAISettings: View {
             case .unknown: Label("Model list not loaded yet.", systemImage: "questionmark.circle").foregroundStyle(.secondary).font(.caption)
             }
         }
+    }
+}
+
+/// Searchable, selectable model list (a plain List inside a grouped Form does not render reliably).
+struct ModelPickerList: View {
+    var models: [OpenAIModelInfo]
+    var selected: String
+    var verifications: [String: ModelVerification]
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if models.isEmpty {
+                    Text("No models to show. Save your OpenAI key and press Refresh Models.")
+                        .font(.callout).foregroundStyle(.secondary).padding(12)
+                }
+                ForEach(models) { m in
+                    Button { onSelect(m.id) } label: { row(m) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(m.id + (m.id == selected ? ", selected" : ""))
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+    }
+
+    func row(_ m: OpenAIModelInfo) -> some View {
+        let isSelected = m.id == selected
+        return HStack {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle").foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            Text(m.id).font(.body.monospaced())
+            Spacer()
+            if let v = verifications[m.id] {
+                StatusChip(v.structuredOutputWorks ? "Tested ✓" : "Test failed", color: v.structuredOutputWorks ? .green : .red)
+            }
+            if let c = m.created {
+                Text(Date(timeIntervalSince1970: TimeInterval(c)).formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.12) : .clear)
+        .contentShape(Rectangle())
     }
 }
 
