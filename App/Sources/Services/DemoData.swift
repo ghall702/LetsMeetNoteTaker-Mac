@@ -116,6 +116,19 @@ enum DemoData {
             l.jobs[0].stage = .transcribing; l.jobs[1].stage = .queued
             store.addLesson(l)
         }
+        // Sample usage records (screenshots only).
+        let ledger = UsageLedger(directory: store.directory)
+        for (i, l) in store.allLessons.enumerated() {
+            let input = [15_200, 48_900, 21_300, 9_800][i % 4], output = [2_400, 5_100, 3_200, 1_900][i % 4]
+            ledger.append(UsageRecord(responseId: "resp_demo_\(i)", date: now.addingTimeInterval(-Double(i) * 3_000), model: "gpt-6.1-sol",
+                                      lessonId: l.id, jobId: l.jobs.first?.id, purpose: .lessonNotes, outcome: .succeeded,
+                                      usage: TokenUsage(inputTokens: input, cachedInputTokens: i == 1 ? 12_000 : 0, outputTokens: output, totalTokens: input + output),
+                                      estimatedCostUSD: nil, complimentaryEligible: true, source: "demo"))
+        }
+        ledger.append(UsageRecord(responseId: "resp_demo_y", date: now.addingTimeInterval(-86_400), model: "gpt-6.1-sol", lessonId: nil, jobId: nil,
+                                  purpose: .lessonNotes, outcome: .succeeded,
+                                  usage: TokenUsage(inputTokens: 210_000, cachedInputTokens: 0, outputTokens: 62_000, totalTokens: 272_000),
+                                  estimatedCostUSD: nil, complimentaryEligible: true, source: "demo"))
         let folder = "/Users/Shared/Zoom/2026-11-14 16.00.12 LetsMeet - EE"
         store.upsertDetection(PendingDetection(folderPath: folder, recordings: [
             ScannedRecording(path: folder + "/zoom_0.mp4", fileSize: 512_000_000, durationSeconds: 1810),

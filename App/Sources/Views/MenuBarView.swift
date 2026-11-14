@@ -14,6 +14,7 @@ struct MenuBarView: View {
                 Spacer()
                 if !model.isOnline { Label("Offline", systemImage: "wifi.slash").font(.caption).foregroundStyle(.orange) }
             }
+            MenuUsageLine()
             if !model.detections.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("New recordings").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -58,5 +59,22 @@ struct MenuBarView: View {
         NSApp.setActivationPolicy(.regular)
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct MenuUsageLine: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        let s = model.settings.usage
+        let today = UsageAccounting.today(model.usageRecords, now: Date(), settings: s)
+        let color = allowanceColor(used: today.eligibleTokens, allowance: s.dailyComplimentaryTokens)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text("OpenAI today: \(UsageFormat.tokens(today.eligibleTokens)) of \(UsageFormat.tokens(s.dailyComplimentaryTokens)) free tokens")
+                    .font(.caption.monospacedDigit())
+            }
+            ProgressView(value: Double(min(today.eligibleTokens, s.dailyComplimentaryTokens)), total: Double(max(1, s.dailyComplimentaryTokens))).tint(color)
+        }
     }
 }

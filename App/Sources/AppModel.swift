@@ -4,13 +4,14 @@ import AppKit
 import LessonNotesCore
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, history, students, settings
+    case dashboard, history, students, usage, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .dashboard: return "Dashboard"
         case .history: return "History"
         case .students: return "Students"
+        case .usage: return "API Usage"
         case .settings: return "Settings"
         }
     }
@@ -19,6 +20,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .dashboard: return "rectangle.grid.2x2"
         case .history: return "clock.arrow.circlepath"
         case .students: return "person.2"
+        case .usage: return "chart.bar.xaxis"
         case .settings: return "gearshape"
         }
     }
@@ -63,6 +65,9 @@ final class AppModel: ObservableObject {
     let whisper: WhisperModelManager
     let network = NetworkMonitor()
     let memoryMonitor = MemoryPressureMonitor()
+    /// Local OpenAI usage records (token counts from API responses; no keys or transcripts).
+    private(set) var usageMonitor: UsageMonitor!
+    @Published var usageVersion = 0
     private(set) var engine: JobEngine!
     private var transcriber: WhisperTranscriber!
     private var watcher: FolderWatcher?
@@ -121,6 +126,9 @@ final class AppModel: ObservableObject {
             startupError = "Could not open the data folder: \(error.localizedDescription)"
         }
         whisper = WhisperModelManager()
+        let storeForUsage = store
+        let ledger = UsageLedger(directory: store.directory)
+        usageMonitor = UsageMonitor(ledger: ledger, settings: { @Sendable in storeForUsage.settings.usage })
         banner = startupError
         let health = store.health
         if let e = health.backupError ?? health.migrationError {
@@ -130,6 +138,9 @@ final class AppModel: ObservableObject {
         }
         if demoMode != nil { DemoData.seed(store) }
         reload()
+        usageMonitor.ledger.onChange = { [weak self] in
+            DispatchQueue.main.async { self?.usageVersion += 1 }
+        }
         store.onChange = { [weak self] in
             DispatchQueue.main.async { self?.scheduleReload() }
         }
@@ -149,6 +160,7 @@ final class AppModel: ObservableObject {
         }, poolLimit: { @Sendable in store.settings.maxConcurrentTranscriptions })
         let net = network
         let memory = memoryMonitor
+        let usage = usageMonitor
         let deps = EngineDependencies(
             extractor: AVAudioExtractor(),
             transcriber: transcriber,
@@ -156,7 +168,8 @@ final class AppModel: ObservableObject {
                 guard let key = KeychainStore.get(.openAI) else { throw OpenAIError.missingKey }
                 let s = store.settings
                 guard !s.openAIModel.isEmpty else { throw OpenAIError.modelUnavailable("No OpenAI model selected in Settings.") }
-                let client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
+                var client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
+                client.usageMonitor = usage
                 return OpenAINotesProducer(generator: NotesGenerator(performer: client, model: s.openAIModel, effort: s.reasoningEffort,
                                                                      chunkThresholdTokens: s.chunkThresholdTokens, maxOutputTokens: s.maxOutputTokens))
             },
@@ -245,6 +258,7 @@ final class AppModel: ObservableObject {
         case "history", "regenerate": sidebar = .history; demoReviewDraft = demo == "regenerate"; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
         case "students": sidebar = .students; demoSelectFirstStudent = true
         case "settings": sidebar = .settings; settingsTab = 1
+        case "usage": sidebar = .usage
         case "onboarding": showOnboarding = true
         default: sidebar = .dashboard
         }
@@ -377,7 +391,9 @@ final class AppModel: ObservableObject {
 
     func openAIClient() throws -> OpenAIClient {
         guard let key = KeychainStore.get(.openAI) else { throw OpenAIError.missingKey }
-        return try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 120))
+        var client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 120))
+        client.usageMonitor = usageMonitor
+        return client
     }
 
     func testWebsite() async {
@@ -435,7 +451,11 @@ final class AppModel: ObservableObject {
         isTestingModel = true
         defer { isTestingModel = false }
         do {
-            let v = await ModelTester.run(client: try openAIClient(), model: model, effort: settings.reasoningEffort)
+            let client = try openAIClient()
+            let effort = settings.reasoningEffort
+            let v = await UsageContext.$current.withValue(UsageContext(lessonId: nil, jobId: nil, purpose: .modelTest)) {
+                await ModelTester.run(client: client, model: model, effort: effort)
+            }
             store.updateModelList { $0.verifications[model] = v }
         } catch {
             store.updateModelList {
@@ -581,7 +601,8 @@ final class AppModel: ObservableObject {
         let m = model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !m.isEmpty else { throw OpenAIError.modelUnavailable("Choose a model.") }
         let s = store.settings
-        let client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
+        var client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
+        client.usageMonitor = usageMonitor
         let producer = OpenAINotesProducer(generator: NotesGenerator(performer: client, model: m, effort: effort,
                                                                      chunkThresholdTokens: s.chunkThresholdTokens, maxOutputTokens: s.maxOutputTokens))
         let v = try await NotesRegeneration.regenerate(store: store, jobId: job.id, options: options, producer: producer, progress: progress)

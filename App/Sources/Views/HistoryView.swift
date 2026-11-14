@@ -367,6 +367,8 @@ struct JobSection: View {
             }
             .font(.callout)
 
+            LessonUsageSummary(jobId: job.id)
+
             if let rep = job.replacement { replacementCard(rep) }
 
             if let n = job.notes {

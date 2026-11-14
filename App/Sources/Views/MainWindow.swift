@@ -30,6 +30,7 @@ struct MainWindow: View {
                 case .dashboard: DashboardView()
                 case .history: HistoryView()
                 case .students: StudentsView()
+                case .usage: UsageView()
                 case .settings: SettingsView()
                 }
             }

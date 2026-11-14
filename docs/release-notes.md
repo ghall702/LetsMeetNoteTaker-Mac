@@ -8,6 +8,12 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
+### What's in 1.3
+- **OpenAI usage counter:** Dashboard panel, menu bar line and a new **API Usage** page — tokens used today (UTC), the 250,000 complimentary allowance, estimated remaining, time to the 00:00 UTC reset, lessons today, and estimated spending today and this month, with green/amber/red indicators.
+- **Per-lesson usage:** input, cached input, output and total tokens exactly as reported by OpenAI, plus a clearly labelled cost estimate.
+- **Free allowance protection (optional):** before each request the app counts input tokens with OpenAI, adds the maximum output and a safety margin, and holds the lesson until after 00:00 UTC if it might not fit. A local safeguard, not an OpenAI billing cap.
+- Configurable model pricing and complimentary-model list. Usage records stay on this Mac and contain no keys, transcripts or pupil details.
+
 ### What's in 1.2
 - **Your work is protected on update:** before upgrading, the lesson history, settings, students and every saved transcript (including those of failed lessons) are backed up and verified. The upgrade is checked afterwards and never replaces data it cannot read.
 - **Fix & Retry resumes from the last completed step:** lessons that failed at OpenAI reuse the saved transcript — no audio extraction or Whisper. Lessons with notes go straight to upload with the same submission ID (no duplicates).

@@ -11,6 +11,10 @@ struct DashboardView: View {
                 header
                 if !model.setupIssues.isEmpty { setupCard }
                 if let e = model.watchError { Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                Card(title: "OpenAI usage today", systemImage: "chart.bar.xaxis") {
+                    UsagePanel(compact: true)
+                    Button("Usage history…") { model.sidebar = .usage }.buttonStyle(.link)
+                }
                 detectionsCard
                 if !model.heldJobs.isEmpty { heldCard }
                 activeCard

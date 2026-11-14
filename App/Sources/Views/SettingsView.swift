@@ -192,6 +192,8 @@ struct OpenAISettings: View {
                 }
             }
 
+            UsageSettingsSection()
+
             Section("Output length") {
                 Toggle("Let the model use its full output allowance (recommended)", isOn: Binding(get: { model.settings.maxOutputTokens == nil }, set: { useDefault in
                     model.updateSettings { $0.maxOutputTokens = useDefault ? nil : 32_000 }
