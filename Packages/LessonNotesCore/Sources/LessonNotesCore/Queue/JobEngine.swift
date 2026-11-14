@@ -73,11 +73,15 @@ public struct EngineDependencies: Sendable {
     public var isOnline: @Sendable () -> Bool
     public var appVersion: String
     public var makeReplacer: (@Sendable () throws -> NoteReplacing)?
+    /// macOS memory pressure (the app wires this to a DispatchSource); reduces new transcriptions.
+    public var memoryPressure: @Sendable () -> MemoryPressureLevel
 
     public init(extractor: AudioExtracting, transcriber: Transcribing, makeNotesProducer: @escaping @Sendable () throws -> NotesProducing,
                 makeSubmitter: @escaping @Sendable () throws -> NoteSubmitting, isOnline: @escaping @Sendable () -> Bool, appVersion: String,
-                makeReplacer: (@Sendable () throws -> NoteReplacing)? = nil) {
+                makeReplacer: (@Sendable () throws -> NoteReplacing)? = nil,
+                memoryPressure: @escaping @Sendable () -> MemoryPressureLevel = { .normal }) {
         self.makeReplacer = makeReplacer
+        self.memoryPressure = memoryPressure
         self.extractor = extractor
         self.transcriber = transcriber
         self.makeNotesProducer = makeNotesProducer
@@ -86,6 +90,8 @@ public struct EngineDependencies: Sendable {
         self.appVersion = appVersion
     }
 }
+
+public enum MemoryPressureLevel: Sendable, Equatable { case normal, warning, critical }
 
 public enum EngineEvent: Sendable, Equatable {
     case progress(jobId: UUID, fraction: Double, message: String)
@@ -128,7 +134,8 @@ public actor JobEngine {
     let now: @Sendable () -> Date
 
     private var running: [UUID: Task<Void, Never>] = [:]
-    private var transcribingJob: UUID?
+    private var transcribingJobs: Set<UUID> = []
+    private var networkJobs: Set<UUID> = []
     private var userCancelled: Set<UUID> = []
     private var loopTask: Task<Void, Never>?
     private var eventHandler: (@Sendable (EngineEvent) -> Void)?
@@ -156,9 +163,16 @@ public actor JobEngine {
         try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         for l in store.allLessons {
             for j in l.jobs where j.stage == .extracting || j.stage == .transcribing {
+                let saved = store.transcriptState(jobId: j.id) == .valid
                 store.updateJob(id: j.id, now: now()) {
-                    $0.stage = .queued
-                    $0.statusMessage = "Restarting transcription after the app was closed"
+                    if saved {
+                        $0.hasTranscript = true
+                        $0.stage = $0.notes != nil ? .submitting : .summarising
+                        $0.statusMessage = "Reusing the transcript saved before the app was closed"
+                    } else {
+                        $0.stage = .queued
+                        $0.statusMessage = "Restarting transcription after the app was closed"
+                    }
                 }
             }
         }
@@ -189,36 +203,61 @@ public actor JobEngine {
 
     // MARK: Scheduling
 
+    /// A job needs Whisper only if no valid transcript is saved (the flag alone is not trusted).
     func needsTranscription(_ j: Job) -> Bool {
-        [.queued, .extracting, .transcribing].contains(j.stage) && !(j.hasTranscript && store.transcriptExists(jobId: j.id))
+        [.queued, .extracting, .transcribing].contains(j.stage) && store.transcriptState(jobId: j.id) != .valid
     }
 
-    /// Starts every job that is due, respecting concurrency, connectivity and the
-    /// one-transcription-at-a-time limit (memory).
+    /// Transcription slots in use and the effective limit (setting, reduced under memory pressure).
+    public var activeTranscriptionCount: Int { transcribingJobs.count }
+    public var activeNetworkCount: Int { networkJobs.count }
+    public private(set) var maxObservedTranscriptions = 0
+
+    public func transcriptionLimit() -> Int {
+        let configured = max(1, min(8, store.settings.maxConcurrentTranscriptions))
+        switch deps.memoryPressure() {
+        case .normal: return configured
+        case .warning: return max(1, configured / 2)
+        case .critical: return 1
+        }
+    }
+
+    /// Starts every job that is due. Whisper transcriptions and OpenAI/website work use separate
+    /// pools: at most `maxConcurrentTranscriptions` transcriptions (reduced under memory pressure;
+    /// running ones are never stopped) and `maxConcurrentJobs` network jobs.
     public func tick() {
         guard !isPaused else { return }
         let t = now()
-        let maxJobs = max(1, min(4, store.settings.maxConcurrentJobs))
+        let networkLimit = max(1, min(4, store.settings.maxConcurrentJobs))
+        let transcriptionLimit = transcriptionLimit()
         let online = deps.isOnline()
         let candidates = store.allLessons.flatMap { l in l.jobs }
             .filter { $0.stage.isActive && running[$0.id] == nil }
             .filter { ($0.nextAttemptAt ?? .distantPast) <= t }
             .sorted { $0.createdAt < $1.createdAt }
         for job in candidates {
-            guard running.count < maxJobs else { break }
-            let transcribe = needsTranscription(job)
-            if transcribe && transcribingJob != nil { continue }
-            if !transcribe && (job.stage.needsNetwork || job.hasTranscript) && !online {
-                if job.statusMessage != "Waiting for internet" {
-                    store.updateJob(id: job.id, now: t) { $0.statusMessage = "Waiting for internet" }
-                }
-                continue
-            }
-            if transcribe { transcribingJob = job.id }
             let id = job.id
-            running[id] = Task { [weak self] in
-                await self?.process(jobId: id)
-                await self?.finished(jobId: id)
+            if needsTranscription(job) {
+                guard transcribingJobs.count < transcriptionLimit else { continue }
+                transcribingJobs.insert(id)
+                maxObservedTranscriptions = max(maxObservedTranscriptions, transcribingJobs.count)
+                running[id] = Task { [weak self] in
+                    await self?.process(jobId: id, phase: .transcription)
+                    await self?.finished(jobId: id)
+                }
+            } else {
+                guard online else {
+                    if job.statusMessage != "Waiting for internet" {
+                        store.updateJob(id: job.id, now: t) { $0.statusMessage = "Waiting for internet" }
+                    }
+                    continue
+                }
+                guard networkJobs.count < networkLimit else { continue }
+                networkJobs.insert(id)
+                running[id] = Task { [weak self] in
+                    await self?.process(jobId: id, phase: .network)
+                    await self?.finished(jobId: id)
+                }
             }
         }
         // Queued website replacements (PATCH), for submitted notes.
@@ -227,8 +266,9 @@ public actor JobEngine {
                 guard let r = j.replacement, r.state == .queued, running[j.id] == nil else { return false }
                 return (r.nextAttemptAt ?? .distantPast) <= t
             }
-            for job in due where running.count < maxJobs + 2 {
+            for job in due where networkJobs.count < networkLimit + 2 {
                 let id = job.id
+                networkJobs.insert(id)
                 running[id] = Task { [weak self] in
                     await self?.processReplacement(jobId: id)
                     await self?.finished(jobId: id)
@@ -240,18 +280,24 @@ public actor JobEngine {
 
     private func finished(jobId: UUID) {
         running[jobId] = nil
-        if transcribingJob == jobId { transcribingJob = nil }
+        transcribingJobs.remove(jobId)
+        networkJobs.remove(jobId)
         tick()
     }
 
     /// Test helper: keeps ticking until no job is running or due now.
-    public func runUntilIdle(maxRounds: Int = 50) async {
+    public func runUntilIdle(maxRounds: Int = 200) async {
         for _ in 0..<maxRounds {
             tick()
             let tasks = Array(running.values)
             if tasks.isEmpty { return }
             for t in tasks { await t.value }
         }
+    }
+
+    /// Test helper: wait for currently running work only.
+    public func waitForRunning() async {
+        for t in Array(running.values) { await t.value }
     }
 
     // MARK: User actions
@@ -268,23 +314,45 @@ public actor JobEngine {
         }
     }
 
-    /// Manual retry ("Fix & retry"/"Resume"): resumes at the failed stage, keeping the
-    /// transcript, notes and submission id. Model/effort settings are re-read.
-    public func retry(jobId: UUID) {
+    /// Manual retry ("Fix & Retry"/"Resume"). Resumes from the last completed stage using what is
+    /// actually saved: a valid transcript goes straight to OpenAI (no audio extraction or Whisper);
+    /// saved notes go straight to website submission with the same submission id. The current
+    /// model and prompt settings are used for a new summarisation.
+    @discardableResult
+    public func retry(jobId: UUID) -> JobRecovery.RetryPlan? {
+        guard let job = store.job(id: jobId) else { return nil }
+        let state = store.transcriptState(jobId: jobId)
+        let plan = JobRecovery.retryPlan(for: job, transcriptState: state)
+        if case .corrupt = state { store.quarantineTranscript(jobId: jobId, now: now()) }
         store.updateJob(id: jobId, now: now()) { j in
-            var stage = j.resumeStage ?? .queued
-            if stage == .extracting || stage == .transcribing { stage = .queued }
-            if j.stage == .held { stage = .queued }
-            if stage == .summarising { j.summaryModel = nil; j.reasoningEffort = nil }
-            j.stage = stage
+            switch plan {
+            case .submit:
+                j.stage = .submitting
+            case .summarise:
+                j.stage = .summarising
+                j.hasTranscript = true
+                j.summaryModel = nil
+                j.reasoningEffort = nil
+                j.promptSnapshot = nil // use the prompt configured now
+            case .transcribe:
+                j.stage = .queued
+                j.hasTranscript = false
+            case .resume(let s):
+                j.stage = s
+            }
             j.error = nil
             j.attempts = 0
             j.firstRetryAt = nil
             j.nextAttemptAt = nil
-            j.statusMessage = "Queued for retry"
+            switch plan {
+            case .transcribe(let reason?): j.statusMessage = reason
+            case .summarise: j.statusMessage = "Reusing the saved transcript"
+            default: j.statusMessage = "Queued for retry"
+            }
         }
         userCancelled.remove(jobId)
         tick()
+        return plan
     }
 
     public func startHeld(jobId: UUID) {
@@ -300,7 +368,12 @@ public actor JobEngine {
 
     private func update(_ id: UUID, _ body: (inout Job) -> Void) { store.updateJob(id: id, now: now(), body) }
 
-    private func process(jobId: UUID) async {
+    enum Phase { case transcription, network }
+
+    /// Runs one phase: `.transcription` holds a Whisper slot and stops once the transcript is
+    /// saved (the next tick schedules summarising in the network pool); `.network` runs
+    /// summarising and submission.
+    private func process(jobId: UUID, phase: Phase) async {
         var stageAtFailure: JobStage = .queued
         do {
             while true {
@@ -309,16 +382,22 @@ public actor JobEngine {
                 stageAtFailure = job.stage
                 switch job.stage {
                 case .queued, .extracting, .transcribing:
-                    if job.hasTranscript && store.transcriptExists(jobId: jobId) {
-                        update(jobId) { $0.stage = .summarising }
+                    if store.transcriptState(jobId: jobId) == .valid {
+                        update(jobId) { $0.hasTranscript = true; $0.stage = $0.notes != nil ? .submitting : .summarising }
+                        if phase == .transcription { return }
                         continue
                     }
+                    guard phase == .transcription else { return }
+                    if case .corrupt = store.transcriptState(jobId: jobId) { store.quarantineTranscript(jobId: jobId, now: now()) }
                     try await transcribeStage(lesson: lesson, job: job)
+                    return // release the transcription slot; summarising is scheduled separately
                 case .summarising:
+                    guard phase == .network else { return }
                     if job.notes != nil { update(jobId) { $0.stage = .submitting }; continue }
                     guard deps.isOnline() else { update(jobId) { $0.statusMessage = "Waiting for internet" }; return }
                     try await summariseStage(lesson: lesson, job: job)
                 case .submitting:
+                    guard phase == .network else { return }
                     guard deps.isOnline() else { update(jobId) { $0.statusMessage = "Waiting for internet" }; return }
                     try await submitStage(lesson: lesson, job: job)
                 default:

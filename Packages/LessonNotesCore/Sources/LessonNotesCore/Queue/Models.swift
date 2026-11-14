@@ -53,18 +53,36 @@ public struct JobError: Codable, Equatable, Sendable {
         case openAI
         case recordingMissing
         case cancelled
+        /// OpenAI billing: credits/quota exhausted. Needs George to add credit; never auto-retried.
+        case openAICredits
+        /// OpenAI key, permission or model problem: fix in Settings, then retry.
+        case openAISettings
     }
     public var message: String
     public var kind: Kind
     public var httpStatus: Int?
     public var code: String?
     public var occurredAt: Date
-    public init(message: String, kind: Kind = .general, httpStatus: Int? = nil, code: String? = nil, occurredAt: Date = Date()) {
+    /// Original technical message, when `message` is a friendlier rewrite.
+    public var detail: String?
+    public init(message: String, kind: Kind = .general, httpStatus: Int? = nil, code: String? = nil, occurredAt: Date = Date(), detail: String? = nil) {
         self.message = message
         self.kind = kind
         self.httpStatus = httpStatus
         self.code = code
         self.occurredAt = occurredAt
+        self.detail = detail
+    }
+
+    public static let openAIBillingURL = URL(string: "https://platform.openai.com/settings/organization/billing/overview")!
+    public static let creditsMessage = "OpenAI API credits exhausted. Your transcription has been saved. Add credits to your OpenAI account, then click Fix & Retry to generate the lesson notes."
+
+    /// Recognises OpenAI "no credits / insufficient quota / billing" wording in any error text.
+    public static func looksLikeOpenAICredits(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.contains("insufficient_quota") || t.contains("no credits") || t.contains("credits remaining")
+            || t.contains("exceeded your current quota") || t.contains("billing") && t.contains("openai")
+            || t.contains("add credits")
     }
 }
 
@@ -157,7 +175,12 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var displayStatus: String {
         switch stage {
         case .submitted: return (remoteStatus ?? .pending).label
-        case .failed: return error?.kind == .payloadTooLarge ? "Needs attention" : "Failed"
+        case .failed:
+            switch error?.kind {
+            case .payloadTooLarge?: return "Needs attention"
+            case .openAICredits?: return "OpenAI credits needed"
+            default: return "Failed"
+            }
         default: return stage.label
         }
     }

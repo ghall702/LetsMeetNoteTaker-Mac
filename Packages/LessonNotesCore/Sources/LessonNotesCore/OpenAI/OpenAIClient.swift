@@ -51,7 +51,7 @@ public enum OpenAIError: Error, LocalizedError, Equatable, Sendable {
         case .structuredOutputUnsupported(let m): return "This model does not support structured JSON output, which lesson notes require. Choose another model. (\(m))"
         case .badRequest(let m): return "OpenAI rejected the request: \(m)"
         case .rateLimited(let m, _): return "OpenAI rate limit reached; will retry. (\(m))"
-        case .quotaExceeded(let m): return "Your OpenAI account has run out of credit or quota. (\(m))"
+        case .quotaExceeded: return JobError.creditsMessage
         case .server(let s, let m): return "OpenAI server error \(s); will retry. \(m)"
         case .refusal(let m): return "OpenAI declined to write notes." + (m.isEmpty ? "" : " (\(m))")
         case .emptyOutput: return "OpenAI declined to write notes (empty response)."
@@ -168,6 +168,9 @@ public struct OpenAIClient: Sendable {
             type = err["type"] as? String
         }
         let lower = message.lowercased()
+        if code == "insufficient_quota" || type == "insufficient_quota" || JobError.looksLikeOpenAICredits(message) {
+            return .quotaExceeded(message)
+        }
         switch status {
         case 401: return .invalidKey(message)
         case 403: return .permissionDenied(message)
@@ -235,7 +238,10 @@ public struct OpenAIClient: Sendable {
         let (data, http) = try await transport.send(try request("responses", method: "POST", json: req.body(stream: false)))
         guard http.statusCode == 200 else { throw Self.mapError(status: http.statusCode, data: data, retryAfter: http.retryAfterSeconds) }
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw OpenAIError.unexpected("not JSON") }
-        if let err = obj["error"] as? [String: Any], let m = err["message"] as? String { throw OpenAIError.unexpected(m) }
+        if let err = obj["error"] as? [String: Any], let m = err["message"] as? String {
+            if (err["code"] as? String) == "insufficient_quota" || JobError.looksLikeOpenAICredits(m) { throw OpenAIError.quotaExceeded(m) }
+            throw OpenAIError.unexpected(m)
+        }
         let r = Self.parseResponseObject(obj)
         try Self.check(r)
         return r
@@ -269,12 +275,14 @@ public struct OpenAIClient: Sendable {
                 let err = resp?["error"] as? [String: Any]
                 let msg = (err?["message"] as? String) ?? "response failed"
                 let code = err?["code"] as? String
+                if code == "insufficient_quota" || JobError.looksLikeOpenAICredits(msg) { throw OpenAIError.quotaExceeded(msg) }
                 if code == "server_error" || code == "rate_limit_exceeded" { throw OpenAIError.server(500, msg) }
                 throw OpenAIError.unexpected(msg)
             case "error":
                 let err = (event.payload["error"] as? [String: Any]) ?? event.payload
                 let msg = (err["message"] as? String) ?? "stream error"
                 let code = (err["code"] as? String) ?? ""
+                if code == "insufficient_quota" || JobError.looksLikeOpenAICredits(msg) { throw OpenAIError.quotaExceeded(msg) }
                 if code.contains("rate_limit") { throw OpenAIError.rateLimited(msg, retryAfter: nil) }
                 if code.contains("server") { throw OpenAIError.server(500, msg) }
                 throw OpenAIError.unexpected(msg)

@@ -1,0 +1,1 @@
+{"jobId":"B6000000-0000-4000-8000-000000000006","language":"en","model":"whisperkit/large","parts":[{"durationSec":3300,"filename":"zoom_0.mp4","recordingId":"C6000000-0000-4000-8000-000000000006","segments":[{"end":5,"start":0,"text":"Crash-window transcript text."}]}],"savedAt":"2027-01-15T08:08:20.000Z"}

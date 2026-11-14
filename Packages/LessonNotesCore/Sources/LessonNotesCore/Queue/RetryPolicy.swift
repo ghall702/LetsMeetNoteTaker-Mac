@@ -59,7 +59,16 @@ public enum FailureClass: Equatable, Sendable {
         }
         if let e = error as? OpenAIError {
             if e.isRetryable { return .retryable(message: e.localizedDescription, retryAfter: e.retryAfter) }
-            return .fatal(JobError(message: e.localizedDescription, kind: .openAI, occurredAt: now))
+            switch e {
+            case .quotaExceeded(let detail):
+                return .fatal(JobError(message: JobError.creditsMessage, kind: .openAICredits, code: "insufficient_quota", occurredAt: now, detail: detail))
+            case .unexpected(let m) where JobError.looksLikeOpenAICredits(m):
+                return .fatal(JobError(message: JobError.creditsMessage, kind: .openAICredits, code: "insufficient_quota", occurredAt: now, detail: m))
+            case .missingKey, .invalidKey, .permissionDenied, .modelUnavailable, .reasoningUnsupported, .structuredOutputUnsupported:
+                return .fatal(JobError(message: e.localizedDescription, kind: .openAISettings, occurredAt: now))
+            default:
+                return .fatal(JobError(message: e.localizedDescription, kind: .openAI, occurredAt: now))
+            }
         }
         if let e = error as? LetsMeetClientError {
             return .fatal(JobError(message: e.localizedDescription, kind: .authentication, occurredAt: now))

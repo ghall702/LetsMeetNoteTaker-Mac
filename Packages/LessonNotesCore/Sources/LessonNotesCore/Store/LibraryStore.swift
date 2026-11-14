@@ -17,11 +17,32 @@ public final class LibraryStore: @unchecked Sendable {
     /// Called (on an arbitrary thread) after any change.
     public var onChange: (@Sendable () -> Void)?
 
-    public init(directory: URL) throws {
+    /// Current on-disk schema. 1 = versions 1.0/1.1, 2 = 1.2 (adds storage-info.json and stage recovery).
+    public static let schemaVersion = 2
+
+    /// What happened while opening the data folder (shown to George if anything went wrong).
+    public struct StorageHealth: Equatable, Sendable {
+        public var unreadableFiles: [String] = []
+        public var backupPath: String?
+        public var backupError: String?
+        public var migrationError: String?
+        public var migratedFromSchema: Int?
+        public var recoveredJobs: Int = 0
+        /// True when nothing may be written (data is protected after a problem).
+        public var readOnly: Bool { !unreadableFiles.isEmpty || backupError != nil || migrationError != nil }
+    }
+
+    public private(set) var health = StorageHealth()
+    /// Files that must never be overwritten in this session (unreadable or unverified).
+    private var protectedFiles: Set<String> = []
+
+    /// - Parameter appVersion: when set (the real app), the data folder is backed up before an
+    ///   upgrade and migrated recoverably. Tests that only need a store pass nil.
+    public init(directory: URL, appVersion: String? = nil, now: Date = Date()) throws {
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: transcriptsDir, withIntermediateDirectories: true)
-        load()
+        load(appVersion: appVersion, now: now)
     }
 
     var transcriptsDir: URL { directory.appendingPathComponent("transcripts", isDirectory: true) }
@@ -29,20 +50,43 @@ public final class LibraryStore: @unchecked Sendable {
 
     // MARK: Load / save
 
-    private struct LibraryFile: Codable { var version: Int; var lessons: [Lesson] }
+    struct LibraryFile: Codable { var version: Int; var lessons: [Lesson] }
 
+    struct StorageInfo: Codable {
+        var schemaVersion: Int
+        var lastAppVersion: String?
+        var updatedAt: Date?
+    }
+
+    enum ReadResult<T> { case ok(T), missing, unreadable(String) }
+
+    private func readStrict<T: Decodable>(_ type: T.Type, _ name: String) -> ReadResult<T> {
+        guard FileManager.default.fileExists(atPath: file(name).path) else { return .missing }
+        guard let data = try? Data(contentsOf: file(name)) else { return .unreadable("could not open the file") }
+        do { return .ok(try JSONCoding.decoder().decode(T.self, from: data)) }
+        catch { return .unreadable(String(describing: error)) }
+    }
+
+    /// Reads a file; if it exists but cannot be decoded, it is copied aside and protected from
+    /// being overwritten, so a later save can never replace real data with empty data.
     private func read<T: Decodable>(_ type: T.Type, _ name: String) -> T? {
-        guard let data = try? Data(contentsOf: file(name)) else { return nil }
-        do { return try JSONCoding.decoder().decode(T.self, from: data) }
-        catch {
-            // Keep a copy of an unreadable file rather than silently overwriting it.
-            let backup = file(name + ".unreadable-\(Int(Date().timeIntervalSince1970))")
-            try? FileManager.default.copyItem(at: file(name), to: backup)
+        switch readStrict(type, name) {
+        case .ok(let v): return v
+        case .missing: return nil
+        case .unreadable:
+            let copy = file(name + ".unreadable-\(Int(Date().timeIntervalSince1970))")
+            try? FileManager.default.copyItem(at: file(name), to: copy)
+            protectedFiles.insert(name)
+            health.unreadableFiles.append(name)
             return nil
         }
     }
 
     private func write<T: Encodable>(_ value: T, _ name: String) {
+        if protectedFiles.contains(name) || protectedFiles.contains("*") {
+            lastWriteError = "\(name) was not saved because the data folder is protected after a problem opening it."
+            return
+        }
         do {
             let data = try JSONCoding.encoder(pretty: false).encode(value)
             try data.write(to: file(name), options: [.atomic])
@@ -54,8 +98,38 @@ public final class LibraryStore: @unchecked Sendable {
 
     public private(set) var lastWriteError: String?
 
-    private func load() {
-        lessons = read(LibraryFile.self, "library.json")?.lessons ?? []
+    public var backupsDirectory: URL { directory.appendingPathComponent("Backups", isDirectory: true) }
+
+    private func load(appVersion: String?, now: Date) {
+        let fm = FileManager.default
+        let info: StorageInfo? = { if case .ok(let i) = readStrict(StorageInfo.self, "storage-info.json") { return i } else { return nil } }()
+        let hasExistingData = fm.fileExists(atPath: file("library.json").path) || fm.fileExists(atPath: file("settings.json").path)
+        let fromSchema = info?.schemaVersion ?? 1
+        let upgrading = appVersion != nil && hasExistingData && (fromSchema < Self.schemaVersion || info?.lastAppVersion != appVersion)
+
+        // 1–4. Back up everything (including transcripts of failed jobs) and verify the copy.
+        if upgrading, let appVersion {
+            do {
+                let url = try StorageBackup.create(from: directory, label: "before-\(appVersion)", now: now)
+                health.backupPath = url.path
+            } catch {
+                // Without a verified backup nothing is changed or written this session.
+                health.backupError = error.localizedDescription
+                protectedFiles.insert("*")
+            }
+        }
+
+        switch readStrict(LibraryFile.self, "library.json") {
+        case .ok(let lib): lessons = lib.lessons
+        case .missing: lessons = []
+        case .unreadable(let why):
+            let copy = file("library.json.unreadable-\(Int(now.timeIntervalSince1970))")
+            try? fm.copyItem(at: file("library.json"), to: copy)
+            protectedFiles.insert("library.json")
+            health.unreadableFiles.append("library.json")
+            health.migrationError = "Your lesson history could not be read, so it has been left untouched (\(why.prefix(200)))."
+            lessons = []
+        }
         mappingsStorage = read([StudentMapping].self, "mappings.json") ?? []
         roomsStorage = read(CachedRooms.self, "rooms.json") ?? CachedRooms()
         modelsStorage = read(CachedModelList.self, "models.json") ?? CachedModelList()
@@ -67,6 +141,57 @@ public final class LibraryStore: @unchecked Sendable {
             settingsStorage.globalPrompt = PromptLibrary.starterGlobalPrompt
             write(settingsStorage, "settings.json")
         }
+
+        // 5–6. Recover job stages from the data actually on disk, write atomically, then verify.
+        guard !protectedFiles.contains("library.json"), !protectedFiles.contains("*") else { return }
+        let before = lessons
+        var migrated = lessons
+        let changes = JobRecovery.normalise(&migrated) { [self] id in transcriptStateUnlocked(id) }
+        health.recoveredJobs = changes
+        if changes > 0 || upgrading {
+            lessons = migrated
+            saveLibrary()
+            let ok: Bool = {
+                guard case .ok(let reread) = readStrict(LibraryFile.self, "library.json") else { return false }
+                let ids = { (ls: [Lesson]) in Set(ls.flatMap { l in [l.id] + l.jobs.map(\.id) + l.recordings.map(\.id) }) }
+                return reread.lessons.count == before.count && ids(reread.lessons) == ids(before)
+            }()
+            if !ok {
+                // Put the original back (from memory, then the verified backup) and stop writing.
+                lessons = before
+                if let data = try? JSONCoding.encoder().encode(LibraryFile(version: 1, lessons: before)) { try? data.write(to: file("library.json"), options: [.atomic]) }
+                if let b = health.backupPath, let data = try? Data(contentsOf: URL(fileURLWithPath: b).appendingPathComponent("library.json")) {
+                    try? data.write(to: file("library.json"), options: [.atomic])
+                }
+                health.migrationError = "Updating the lesson history could not be verified, so the original was kept."
+                protectedFiles.insert("library.json")
+                return
+            }
+        }
+        if upgrading { health.migratedFromSchema = fromSchema }
+        if let appVersion, health.backupError == nil {
+            write(StorageInfo(schemaVersion: Self.schemaVersion, lastAppVersion: appVersion, updatedAt: now), "storage-info.json")
+        }
+    }
+
+    func transcriptStateUnlocked(_ jobId: UUID) -> TranscriptState {
+        let url = transcriptURL(jobId)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        guard let data = try? Data(contentsOf: url) else { return .corrupt("the file could not be opened") }
+        guard let t = try? JSONCoding.decoder().decode(StoredTranscript.self, from: data) else { return .corrupt("the file is damaged") }
+        if t.parts.flatMap(\.segments).allSatisfy({ TranscriptCleaner.clean($0.text).isEmpty }) { return .corrupt("the transcript is empty") }
+        return .valid
+    }
+
+    /// Whether a usable transcript is saved for a job.
+    public func transcriptState(jobId: UUID) -> TranscriptState { transcriptStateUnlocked(jobId) }
+
+    /// Moves a damaged transcript aside (never deleted) before it is regenerated.
+    public func quarantineTranscript(jobId: UUID, now: Date = Date()) {
+        let url = transcriptURL(jobId)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let dest = transcriptsDir.appendingPathComponent(jobId.uuidString + ".damaged-\(Int(now.timeIntervalSince1970)).json")
+        try? FileManager.default.moveItem(at: url, to: dest)
     }
 
     private func changed() { onChange?() }
@@ -236,6 +361,9 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     public func transcriptExists(jobId: UUID) -> Bool { FileManager.default.fileExists(atPath: transcriptURL(jobId).path) }
+
+    /// True when a valid, readable transcript is saved (the flag alone is not trusted).
+    public func hasUsableTranscript(jobId: UUID) -> Bool { transcriptStateUnlocked(jobId) == .valid }
 
     private func deleteTranscriptFile(jobId: UUID) {
         try? FileManager.default.removeItem(at: transcriptURL(jobId))
