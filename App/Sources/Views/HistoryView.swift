@@ -1,0 +1,378 @@
+import SwiftUI
+import AppKit
+import LessonNotesCore
+
+enum HistoryFilter: String, CaseIterable, Identifiable {
+    case all = "All", processing = "Processing", pending = "Waiting for approval", published = "Published",
+         rejected = "Rejected", deleted = "Deleted", failed = "Failed / needs attention"
+    var id: String { rawValue }
+
+    func matches(_ l: Lesson) -> Bool {
+        switch self {
+        case .all: return true
+        case .processing: return l.jobs.contains { $0.stage.isActive || $0.stage == .held }
+        case .pending: return l.jobs.contains { $0.stage == .submitted && ($0.remoteStatus ?? .pending) == .pending }
+        case .published: return l.jobs.contains { $0.remoteStatus == .published }
+        case .rejected: return l.jobs.contains { $0.remoteStatus == .rejected }
+        case .deleted: return l.jobs.contains { $0.remoteStatus == .deleted }
+        case .failed: return l.jobs.contains { $0.stage == .failed }
+        }
+    }
+}
+
+struct HistoryView: View {
+    @EnvironmentObject var model: AppModel
+    @State private var query = ""
+    @State private var filter: HistoryFilter = .all
+    @State private var transcriptMatches: Set<UUID> = []
+    @State private var searchTask: Task<Void, Never>?
+
+    var filtered: [Lesson] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return model.lessons.filter { l in
+            guard filter.matches(l) else { return false }
+            guard !q.isEmpty else { return true }
+            let hay = [l.pupilName, l.roomName, l.lessonDate, CoreFormat.longUKDate(l.lessonDate), l.meetingTopic, l.title]
+                + l.recordings.map(\.filename) + l.jobs.compactMap { $0.notes?.overview }
+            return hay.contains { $0.lowercased().contains(q) } || transcriptMatches.contains(l.id)
+        }
+    }
+
+    var body: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                Picker("Show", selection: $filter) {
+                    ForEach(HistoryFilter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .padding(8)
+                List(selection: $model.selectedLessonId) {
+                    ForEach(filtered) { l in
+                        HistoryRow(lesson: l).tag(l.id)
+                            .contextMenu {
+                                Button("Reprocess Anyway") { model.reprocess(l) }
+                                Button("Delete Local Data", role: .destructive) { model.deleteLocal(l) }
+                            }
+                    }
+                }
+                .overlay {
+                    if filtered.isEmpty {
+                        Text(model.lessons.isEmpty ? "No lessons yet" : "No matching lessons").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
+            Group {
+                if let l = model.lesson(model.selectedLessonId) {
+                    LessonDetailView(lesson: l)
+                } else {
+                    Text("Select a lesson").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .searchable(text: $query, placement: .toolbar, prompt: "Search pupil, date, title or transcript")
+        .navigationTitle("History")
+        .onChange(of: query) { _, q in searchTranscripts(q) }
+    }
+
+    func searchTranscripts(_ q: String) {
+        searchTask?.cancel()
+        let needle = q.trimmingCharacters(in: .whitespaces).lowercased()
+        guard needle.count >= 3 else { transcriptMatches = []; return }
+        let store = model.store
+        let lessons = model.lessons
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if Task.isCancelled { return }
+            let ids = await Task.detached(priority: .userInitiated) { () -> Set<UUID> in
+                var out = Set<UUID>()
+                for l in lessons where l.jobs.contains(where: { store.searchableTranscript(jobId: $0.id).contains(needle) }) { out.insert(l.id) }
+                return out
+            }.value
+            if !Task.isCancelled { transcriptMatches = ids }
+        }
+    }
+}
+
+struct HistoryRow: View {
+    var lesson: Lesson
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(lesson.pupilName).font(.body.weight(.semibold))
+                Spacer()
+                Text(CoreFormat.longUKDate(lesson.lessonDate)).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(lesson.title).lineLimit(1).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(lesson.jobs) { StatusChip(job: $0) }
+                if lesson.mode != .single { Text(lesson.mode.rawValue).font(.caption2).foregroundStyle(.tertiary) }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+/// Fast read-only text for long transcripts.
+struct ReadOnlyText: NSViewRepresentable {
+    var text: String
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        let tv = scroll.documentView as! NSTextView
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        tv.textContainerInset = NSSize(width: 6, height: 6)
+        tv.string = text
+        return scroll
+    }
+    func updateNSView(_ v: NSScrollView, context: Context) {
+        if let tv = v.documentView as? NSTextView, tv.string != text { tv.string = text }
+    }
+}
+
+struct LessonDetailView: View {
+    @EnvironmentObject var model: AppModel
+    var lesson: Lesson
+    init(lesson: Lesson) { self.lesson = lesson }
+    @State private var confirmDelete = false
+    @State private var confirmReprocess = false
+    @State private var preview: (URL, String)?
+    @State private var previewShown = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                ForEach(lesson.jobs) { job in JobSection(lesson: lesson, job: job) }
+                recordings
+            }
+            .padding(20)
+        }
+        .alert("Delete local data?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { model.deleteLocal(lesson) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the lesson, notes and transcripts from this Mac. It does not delete anything on the website or your Zoom recordings.")
+        }
+        .alert("Reprocess this lesson?", isPresented: $confirmReprocess) {
+            Button("Reprocess Anyway") { model.reprocess(lesson) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recordings will be transcribed and summarised again and submitted as a NEW note (new submission ID). The existing website note is not changed.")
+        }
+        .sheet(isPresented: $previewShown) {
+            if let p = preview { PreviewSheet(url: p.0, title: p.1) }
+        }
+    }
+
+    var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(lesson.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+            HStack(spacing: 12) {
+                Label(lesson.pupilName, systemImage: "person")
+                Label(CoreFormat.longUKDate(lesson.lessonDate), systemImage: "calendar")
+                if let s = lesson.startedAt { Label(s.formatted(date: .omitted, time: .shortened), systemImage: "clock") }
+                Label(lesson.mode.label, systemImage: "square.stack")
+            }
+            .font(.callout).foregroundStyle(.secondary)
+            Text("Room: \(model.rooms.name(for: lesson.roomId) ?? lesson.roomName) · date from \(lesson.dateSource.label)").font(.caption).foregroundStyle(.secondary)
+            if let orig = lesson.reprocessOf, model.lesson(orig) != nil {
+                Button("Reprocessed from an earlier lesson — show original") { model.selectedLessonId = orig }.buttonStyle(.link)
+            }
+            HStack {
+                Link(destination: AppInfo.adminToolsURL) { Label("Open Admin Tools", systemImage: "safari") }
+                Button { confirmReprocess = true } label: { Label("Reprocess Anyway", systemImage: "arrow.triangle.2.circlepath") }
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete Local Data", systemImage: "trash") }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    var recordings: some View {
+        Card(title: "Recordings", systemImage: "film") {
+            ForEach(lesson.recordings) { r in
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(r.filename).font(.body.weight(.medium))
+                        Text([r.recordedAt?.shortDateTime, CoreFormat.duration(r.durationSec), r.fileSize.byteString,
+                              r.sha256.map { "SHA-256 " + String($0.prefix(12)) + "…" }].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Spacer()
+                    Button("Preview") { openPreview(r) }
+                    Button("Show in Finder") { reveal(r) }
+                }
+            }
+        }
+    }
+
+    func access(_ r: RecordingRef) -> URL {
+        if let bm = r.bookmark, let res = FolderAccess.resolve(bm) { return res.url }
+        return URL(fileURLWithPath: r.path)
+    }
+
+    func openPreview(_ r: RecordingRef) {
+        let url = access(r)
+        guard FileManager.default.fileExists(atPath: url.path) else { model.banner = "“\(r.filename)” can no longer be found."; return }
+        preview = (url, r.filename)
+        previewShown = true
+    }
+
+    func reveal(_ r: RecordingRef) {
+        NSWorkspace.shared.activateFileViewerSelecting([access(r)])
+    }
+}
+
+struct JobSection: View {
+    @EnvironmentObject var model: AppModel
+    var lesson: Lesson
+    var job: Job
+    init(lesson: Lesson, job: Job) { self.lesson = lesson; self.job = job }
+    @State private var showTranscript = false
+    @State private var confirmDeleteTranscript = false
+
+    var body: some View {
+        Card(title: lesson.jobs.count > 1 ? "Note \(job.partLetter.uppercased())" : "Lesson note", systemImage: "doc.text") {
+            HStack {
+                StatusChip(job: job)
+                if job.stage.isActive, let p = model.progress[job.id] {
+                    ProgressView(value: p.fraction).frame(width: 140)
+                    Text(p.message).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                actions
+            }
+            if let e = job.error {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(e.kind == .payloadTooLarge ? "Needs attention" : "Error", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Text(e.message).textSelection(.enabled)
+                    Text("Occurred \(e.occurredAt.shortDateTime)" + (e.httpStatus.map { " · HTTP \($0)" } ?? "") + (e.code.map { " · \($0)" } ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+            if job.attempts > 0, let next = job.nextAttemptAt {
+                Text("Retry \(job.attempts) scheduled for \(next.shortDateTime)").font(.caption).foregroundStyle(.secondary)
+            }
+            if let m = job.statusMessage, job.error == nil, job.stage != .submitted { Text(m).font(.caption).foregroundStyle(.secondary) }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                row("Submission ID", job.submissionId)
+                if let n = job.noteId { row("Website note ID", n) }
+                if job.stage == .submitted {
+                    row("Website status", (job.remoteStatus ?? .pending).label + (job.remoteCheckedAt.map { " (checked \($0.shortDateTime))" } ?? ""))
+                }
+                if let s = job.submittedAt { row("Submitted", s.shortDateTime + (job.replayed == true ? " (already received)" : "")) }
+                row("Transcription model", job.transcriptionModel ?? "—")
+                row("OpenAI model", (job.summaryModel ?? "—") + (job.reasoningEffort.flatMap { $0 == .modelDefault ? nil : " · effort \($0.label)" } ?? ""))
+                if let p = job.promptSnapshot { row("Prompt", p.source == .custom ? "Student's custom prompt" : "Global default prompt") }
+            }
+            .font(.callout)
+
+            if let n = job.notes { NotesView(notes: n) }
+
+            if job.hasTranscript, let t = model.store.transcript(jobId: job.id) {
+                let text = t.renderedText(timeZone: lesson.timeZone)
+                DisclosureGroup(isExpanded: $showTranscript) {
+                    ReadOnlyText(text: text).frame(height: 320)
+                    HStack {
+                        Button("Copy Transcript") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                        Button("Delete Local Transcript", role: .destructive) { confirmDeleteTranscript = true }
+                            .disabled(job.stage != .submitted && job.stage != .cancelled)
+                            .help("Transcripts can only be deleted after the note has been uploaded.")
+                    }
+                } label: {
+                    Text("Transcript · \(t.wordCount) words · \(APILimits.utf8Bytes(text).byteStringDecimal)")
+                }
+            } else if let purged = job.transcriptPurgedAt {
+                Text("Local transcript deleted \(purged.shortDateTime) (retention setting or manual deletion).").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .alert("Delete the local transcript?", isPresented: $confirmDeleteTranscript) {
+            Button("Delete", role: .destructive) { model.deleteTranscript(job) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The copy on the website (if uploaded) is not affected.")
+        }
+    }
+
+    @ViewBuilder var actions: some View {
+        switch job.stage {
+        case .held:
+            Button("Start") { model.start(job) }.buttonStyle(.borderedProminent)
+            Button("Cancel") { model.cancel(job) }
+        case .queued, .extracting, .transcribing, .summarising, .submitting:
+            if job.nextAttemptAt != nil { Button("Retry Now") { model.retry(job) } }
+            Button("Cancel") { model.cancel(job) }
+        case .failed:
+            if job.error?.kind != .payloadTooLarge {
+                Button("Fix & Retry") { model.retry(job) }.buttonStyle(.borderedProminent)
+            }
+        case .cancelled:
+            Button("Resume") { model.retry(job) }
+        case .submitted:
+            Button("Check Status") { Task { await model.syncStatuses(force: true) } }
+        }
+    }
+
+    func row(_ k: String, _ v: String) -> some View {
+        GridRow {
+            Text(k).foregroundStyle(.secondary)
+            Text(v).textSelection(.enabled)
+        }
+    }
+}
+
+struct NotesView: View {
+    var notes: GeneratedNotes
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            Text("Notes for pupil and parent").font(.subheadline.weight(.semibold))
+            if !notes.overview.isEmpty { Text(notes.overview).textSelection(.enabled) }
+            list("Key points", notes.keyPoints)
+            list("Next steps", notes.nextSteps)
+            if !notes.homework.isEmpty { field("Homework", notes.homework) }
+            if !notes.vocabulary.isEmpty { field("Vocabulary", notes.vocabulary.joined(separator: ", ")) }
+            if !notes.praise.isEmpty { field("Praise", notes.praise) }
+            if !notes.privateNotes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Private tutor notes (never shown to pupils)", systemImage: "lock.fill").font(.caption.weight(.semibold))
+                    Text(notes.privateNotes).textSelection(.enabled)
+                }
+                .padding(8)
+                .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    @ViewBuilder func list(_ title: String, _ items: [String]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(items, id: \.self) { Text("• " + $0).textSelection(.enabled) }
+            }
+        }
+    }
+
+    func field(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).textSelection(.enabled)
+        }
+    }
+}
+
+extension Int {
+    var byteStringDecimal: String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.locale = Locale(identifier: "en_GB")
+        return (f.string(from: NSNumber(value: self)) ?? String(self)) + " bytes"
+    }
+}

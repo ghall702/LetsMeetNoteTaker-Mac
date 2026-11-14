@@ -1,0 +1,120 @@
+name: Build macOS app
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      DMG_NAME: LetsMeet-Lesson-Notes-1.0.0-build${{ github.run_number }}.dmg
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+
+      - name: Core unit tests
+        working-directory: Packages/LessonNotesCore
+        run: |
+          if ! swift test > "$GITHUB_WORKSPACE/core-tests.log" 2>&1; then
+            grep -E "error|failed" "$GITHUB_WORKSPACE/core-tests.log" | head -150
+            tail -60 "$GITHUB_WORKSPACE/core-tests.log"
+            exit 1
+          fi
+          grep -E "Executed [0-9]+ tests|Test run with" "$GITHUB_WORKSPACE/core-tests.log" | tail -5
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .spm
+          key: spm-${{ hashFiles('project.yml') }}
+
+      - name: Build app (Apple Silicon, Release)
+        run: |
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+          xcodebuild -project LessonNotes.xcodeproj -scheme LessonNotes -configuration Release \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath build -clonedSourcePackagesDirPath .spm \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            build > build.log 2>&1 || { grep -E "error:" build.log | sort -u | head -150; tail -40 build.log; exit 1; }
+          grep -E "BUILD SUCCEEDED" build.log
+          echo "Warnings: $(grep -c 'warning:' build.log || true)"
+          test -d "build/Build/Products/Release/Lesson Notes.app"
+
+      - name: Verify bundle and signature
+        run: |
+          APP="build/Build/Products/Release/Lesson Notes.app"
+          lipo -info "$APP/Contents/MacOS/LessonNotes"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d --entitlements - "$APP"
+          plutil -p "$APP/Contents/Info.plist"
+          du -sh "$APP"
+
+      - name: Launch smoke test
+        run: |
+          APP="build/Build/Products/Release/Lesson Notes.app"
+          "$APP/Contents/MacOS/LessonNotes" > launch.log 2>&1 &
+          PID=$!
+          sleep 25
+          if kill -0 $PID 2>/dev/null; then
+            echo "App is still running after 25 s — launch OK"
+            kill $PID
+          else
+            echo "App exited early"; cat launch.log; exit 1
+          fi
+
+      - name: Create DMG
+        run: |
+          scripts/make-dmg.sh "build/Build/Products/Release/Lesson Notes.app" "$DMG_NAME"
+          ls -la "$DMG_NAME"
+          shasum -a 256 "$DMG_NAME" | tee "$DMG_NAME.sha256"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LetsMeet-Lesson-Notes-DMG
+          path: |
+            ${{ env.DMG_NAME }}
+            ${{ env.DMG_NAME }}.sha256
+          if-no-files-found: error
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            core-tests.log
+            build.log
+            launch.log
+          if-no-files-found: ignore
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" "$DMG_NAME" "$DMG_NAME.sha256" --prerelease --target "${{ github.sha }}" \
+            --title "Let's Meet Lesson Notes 1.0.0 (build ${{ github.run_number }})" \
+            --notes "Unsigned test build for Apple Silicon Macs (macOS 14+). Built from ${{ github.sha }} on branch ${{ github.ref_name }}. Core tests passed; app built and launched on a GitHub macOS runner. See READ ME FIRST.txt inside the DMG for how to open an app that is not notarised."
