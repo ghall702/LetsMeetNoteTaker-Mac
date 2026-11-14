@@ -40,18 +40,30 @@ enum DemoData {
             return try? LessonFactory.make(c, settings: s, held: false, now: start)
         }
         let notes = GeneratedNotes(title: "Adding fractions with different denominators",
-                                   overview: "We practised adding fractions by finding a common denominator, then simplified our answers.",
+                                   overview: "Today we practised adding fractions with **different denominators**. I modelled the method first, then you completed four questions with less support each time.",
                                    keyPoints: ["Find the lowest common multiple of the denominators", "Change both fractions before adding", "Simplify the answer at the end"],
                                    nextSteps: ["Practise subtracting fractions the same way"],
                                    homework: "White Rose worksheet page 4, questions 1–6.",
                                    vocabulary: ["denominator", "numerator", "common multiple"],
                                    praise: "Brilliant persistence on the tricky last question!",
+                                   keyQuotes: [],
+                                   learningContent: "## Finding a common denominator\nTo add fractions, the denominators must match. Find the **lowest common multiple** (LCM) of the denominators.\n\n1. List multiples of each denominator.\n2. Choose the smallest shared multiple.\n3. Convert both fractions.\n\n| Fraction | Converted |\n|---|---|\n| 1/3 | 4/12 |\n| 1/4 | 3/12 |",
+                                   workedExamples: ["**1/3 + 1/4**\n1. LCM of 3 and 4 is 12\n2. 1/3 = 4/12 and 1/4 = 3/12\n3. 4/12 + 3/12 = **7/12**"],
                                    privateNotes: "Still muddles numerator and denominator under pressure.")
         if var l = lesson("Ellie", ellieRoom, ellie, daysAgo: 1, mode: .single, n: 1) {
             l.jobs[0].stage = .submitted; l.jobs[0].remoteStatus = .published; l.jobs[0].notes = notes; l.jobs[0].noteId = "7487e543-demo"
             l.jobs[0].submittedAt = now.addingTimeInterval(-80_000); l.jobs[0].remoteCheckedAt = now; l.jobs[0].summaryModel = "example-model"
             l.jobs[0].transcriptionModel = "whisperkit/openai_whisper-large-v3-v20240930_turbo"
             l.jobs[0].promptSnapshot = PromptResolver.resolve(globalPrompt: s.globalPrompt, mapping: ellie)
+            var draftNotes = notes
+            draftNotes.title = "Adding and simplifying fractions"
+            draftNotes.keyQuotes = []
+            draftNotes.learningContent += "\n\n## Simplifying\nDivide the numerator and denominator by their highest common factor."
+            l.jobs[0].remoteVersion = 2
+            l.jobs[0].noteVersions = [
+                NoteVersion(createdAt: now.addingTimeInterval(-80_000), kind: .original, state: .current, notes: notes, model: "example-model", websiteVersion: 2),
+                NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: draftNotes, model: "example-model", effort: .high, promptSource: .global,
+                            additionalInstructions: "Add a section on simplifying.", baseVersion: 2)]
             store.addLesson(l)
             try? store.saveTranscript(StoredTranscript(jobId: l.jobs[0].id, savedAt: now, model: "whisperkit/openai_whisper-large-v3-v20240930_turbo", language: "en",
                 parts: [TranscriptPart(recordingId: l.recordings[0].id, filename: "zoom_0.mp4", recordedAt: l.recordings[0].recordedAt, durationSec: 1700, segments: [

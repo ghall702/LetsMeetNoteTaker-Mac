@@ -113,6 +113,11 @@ struct HistoryRow: View {
     }
 }
 
+struct RegenerateRequest: Identifiable {
+    let id = UUID()
+    var draftId: UUID?
+}
+
 /// Fast read-only text for long transcripts.
 struct ReadOnlyText: NSViewRepresentable {
     var text: String
@@ -236,6 +241,8 @@ struct JobSection: View {
     init(lesson: Lesson, job: Job) { self.lesson = lesson; self.job = job }
     @State private var showTranscript = false
     @State private var confirmDeleteTranscript = false
+    @State private var regenerate: RegenerateRequest?
+    @State private var showVersions = false
 
     var body: some View {
         Card(title: lesson.jobs.count > 1 ? "Note \(job.partLetter.uppercased())" : "Lesson note", systemImage: "doc.text") {
@@ -276,7 +283,44 @@ struct JobSection: View {
             }
             .font(.callout)
 
-            if let n = job.notes { NotesView(notes: n) }
+            if let rep = job.replacement { replacementCard(rep) }
+
+            if let n = job.notes {
+                Divider()
+                Text("Notes for pupil and parent").font(.subheadline.weight(.semibold))
+                NotesView(notes: n, adjustments: job.notesAdjustments ?? [])
+            }
+
+            if job.notes != nil || job.hasTranscript {
+                HStack {
+                    Button { regenerate = RegenerateRequest(draftId: nil) } label: { Label("Regenerate Notes…", systemImage: "wand.and.stars") }
+                        .disabled(!job.hasTranscript || job.stage.isActive || job.replacement?.state == .queued)
+                        .help(job.hasTranscript ? "Write a new version from the saved transcript" : "The local transcript is no longer available")
+                    let drafts = job.draftVersions
+                    if let d = drafts.last {
+                        Button("Review Draft (\(drafts.count))") { regenerate = RegenerateRequest(draftId: d.id) }
+                    }
+                }
+            }
+
+            let versions = job.allNoteVersions
+            if versions.count > 1 {
+                DisclosureGroup("Version history (\(versions.count))", isExpanded: $showVersions) {
+                    ForEach(versions.reversed()) { v in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(v.notes.title).lineLimit(1)
+                                Text("\(v.createdAt.shortDateTime) · \(v.kind == .original ? "original" : "regenerated") · \(v.model)"
+                                     + (v.websiteVersion.map { " · website v\($0)" } ?? ""))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            StatusChip(versionLabel(v.state), color: versionColor(v.state))
+                            Button(v.state == .draft ? "Review" : "Compare") { regenerate = RegenerateRequest(draftId: v.id) }
+                        }
+                    }
+                }
+            }
 
             if job.hasTranscript, let t = model.store.transcript(jobId: job.id) {
                 let text = t.renderedText(timeZone: lesson.timeZone)
@@ -298,12 +342,81 @@ struct JobSection: View {
                 Text("Local transcript deleted \(purged.shortDateTime) (retention setting or manual deletion).").font(.caption).foregroundStyle(.secondary)
             }
         }
+        .onAppear {
+            if model.demoReviewDraft, let d = job.draftVersions.last {
+                model.demoReviewDraft = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { regenerate = RegenerateRequest(draftId: d.id) }
+            }
+        }
+        .sheet(item: $regenerate) { req in
+            RegenerateSheet(lessonId: lesson.id, jobId: job.id, initialDraftId: req.draftId).environmentObject(model)
+        }
         .alert("Delete the local transcript?", isPresented: $confirmDeleteTranscript) {
             Button("Delete", role: .destructive) { model.deleteTranscript(job) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The copy on the website (if uploaded) is not affected.")
         }
+    }
+
+    func versionLabel(_ s: NoteVersion.State) -> String {
+        switch s {
+        case .current: return "Current"
+        case .draft: return "Draft"
+        case .uploading: return "Replacing…"
+        case .superseded: return "Previous"
+        case .discarded: return "Discarded"
+        }
+    }
+
+    func versionColor(_ s: NoteVersion.State) -> Color {
+        switch s {
+        case .current: return .green
+        case .draft: return .blue
+        case .uploading: return .orange
+        case .superseded, .discarded: return .gray
+        }
+    }
+
+    @ViewBuilder func replacementCard(_ rep: PendingReplacement) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch rep.state {
+            case .queued:
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Replacing the notes on the website…").font(.callout.weight(.medium))
+                }
+                if let m = rep.message { Text(m).font(.caption).foregroundStyle(.secondary) }
+            case .conflict:
+                Label("This note was changed on the website since you generated this version", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange).font(.callout.weight(.medium))
+                Text("Website version \(rep.conflictCurrentVersion.map(String.init) ?? "?")"
+                     + (rep.conflictChangedBy.map { ", changed by \($0)" } ?? "")
+                     + (rep.conflictUpdatedAt.flatMap(CoreFormat.parseISO8601).map { " on \($0.shortDateTime)" } ?? "")
+                     + ". Replacing would overwrite those changes.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Keep Website Version") { model.keepWebsiteVersion(job) }
+                    Button("Replace Anyway") { model.replaceAnyway(job) }.buttonStyle(.borderedProminent)
+                }
+            case .noteDeleted:
+                Label("This note has been deleted on the website", systemImage: "trash").foregroundStyle(.red).font(.callout.weight(.medium))
+                HStack {
+                    Button("Discard Replacement") { model.keepWebsiteVersion(job) }
+                    Button("Submit as New Note") { model.submitAsNewNote(job) }.buttonStyle(.borderedProminent)
+                }
+            case .failed:
+                Label("The replacement could not be sent", systemImage: "exclamationmark.octagon.fill").foregroundStyle(.red).font(.callout.weight(.medium))
+                if let m = rep.message { Text(m).font(.caption).textSelection(.enabled) }
+                HStack {
+                    Button("Discard Replacement") { model.keepWebsiteVersion(job) }
+                    Button("Retry") { model.retryReplacement(job) }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder var actions: some View {
@@ -329,46 +442,6 @@ struct JobSection: View {
         GridRow {
             Text(k).foregroundStyle(.secondary)
             Text(v).textSelection(.enabled)
-        }
-    }
-}
-
-struct NotesView: View {
-    var notes: GeneratedNotes
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider()
-            Text("Notes for pupil and parent").font(.subheadline.weight(.semibold))
-            if !notes.overview.isEmpty { Text(notes.overview).textSelection(.enabled) }
-            list("Key points", notes.keyPoints)
-            list("Next steps", notes.nextSteps)
-            if !notes.homework.isEmpty { field("Homework", notes.homework) }
-            if !notes.vocabulary.isEmpty { field("Vocabulary", notes.vocabulary.joined(separator: ", ")) }
-            if !notes.praise.isEmpty { field("Praise", notes.praise) }
-            if !notes.privateNotes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Private tutor notes (never shown to pupils)", systemImage: "lock.fill").font(.caption.weight(.semibold))
-                    Text(notes.privateNotes).textSelection(.enabled)
-                }
-                .padding(8)
-                .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            }
-        }
-    }
-
-    @ViewBuilder func list(_ title: String, _ items: [String]) -> some View {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(items, id: \.self) { Text("• " + $0).textSelection(.enabled) }
-            }
-        }
-    }
-
-    func field(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(value).textSelection(.enabled)
         }
     }
 }

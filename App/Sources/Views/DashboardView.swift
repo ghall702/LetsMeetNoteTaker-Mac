@@ -128,10 +128,10 @@ struct DashboardView: View {
                         Spacer()
                         StatusChip(job: j)
                     }
-                    Text(j.error?.message ?? "Unknown error").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(j.error?.message ?? j.replacement?.message ?? "Needs attention").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                     HStack {
                         Button("Open") { model.openLesson(l.id) }
-                        if j.error?.kind != .payloadTooLarge {
+                        if j.stage == .failed && j.error?.kind != .payloadTooLarge {
                             Button("Fix & Retry") { model.retry(j) }.buttonStyle(.borderedProminent)
                         }
                     }

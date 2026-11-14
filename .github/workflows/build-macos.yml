@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 75
     env:
-      DMG_NAME: LetsMeet-Lesson-Notes-1.0.0-build${{ github.run_number }}.dmg
+      DMG_NAME: LetsMeet-Lesson-Notes-1.1.0-build${{ github.run_number }}.dmg
     steps:
       - uses: actions/checkout@v4
 
@@ -116,7 +116,7 @@ jobs:
         run: |
           TAG="build-${{ github.run_number }}"
           gh release create "$TAG" "$DMG_NAME" "$DMG_NAME.sha256" --prerelease --target "${{ github.sha }}" \
-            --title "Let's Meet Lesson Notes 1.0.0 (build ${{ github.run_number }})" \
+            --title "Let's Meet Lesson Notes 1.1.0 (build ${{ github.run_number }})" \
             --notes "Unsigned test build for Apple Silicon Macs (macOS 14+). Built from ${{ github.sha }} on branch ${{ github.ref_name }}. Core tests passed; app built and launched on a GitHub macOS runner. See READ ME FIRST.txt inside the DMG for how to open an app that is not notarised."
 
       - name: UI screenshots (demo data, printed as base64 for review)
@@ -124,7 +124,7 @@ jobs:
         run: |
           APP="build/Build/Products/Release/Lesson Notes.app"
           mkdir -p shots
-          for MODE in dashboard review history; do
+          for MODE in history regenerate review; do
             LESSONNOTES_DEMO=$MODE "$APP/Contents/MacOS/LessonNotes" > /dev/null 2>&1 &
             PID=$!
             sleep 9
@@ -132,7 +132,7 @@ jobs:
             kill $PID 2>/dev/null || true
             sleep 1
             if [ -f "shots/$MODE.png" ]; then
-              sips -Z 720 -s format jpeg -s formatOptions 35 "shots/$MODE.png" --out "shots/$MODE.jpg" > /dev/null
+              sips -Z 900 -s format jpeg -s formatOptions 40 "shots/$MODE.png" --out "shots/$MODE.jpg" > /dev/null
               echo "SHOT:$MODE:$(base64 -i "shots/$MODE.jpg" | tr -d '\n')"
             fi
           done

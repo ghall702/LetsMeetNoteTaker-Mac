@@ -201,6 +201,20 @@ struct OpenAISettings: View {
                 }
             }
 
+            Section("Output length") {
+                Toggle("Let the model use its full output allowance (recommended)", isOn: Binding(get: { model.settings.maxOutputTokens == nil }, set: { useDefault in
+                    model.updateSettings { $0.maxOutputTokens = useDefault ? nil : 32_000 }
+                }))
+                if let limit = model.settings.maxOutputTokens {
+                    Stepper(value: Binding(get: { limit }, set: { v in model.updateSettings { $0.maxOutputTokens = v } }), in: 4_000...200_000, step: 4_000) {
+                        Text("Maximum output tokens: \(limit.formatted())")
+                    }
+                    Text("If this is above what your model allows, OpenAI will reject the request — use Test Model to check.").font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Notes are only accepted when OpenAI reports a complete response. If a model runs out of output space, the notes are written in two parts and combined; incomplete notes are never saved or submitted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Long transcripts") {
                 Stepper(value: $chunkTokens, in: 8_000...1_000_000, step: 8_000) {
                     Text("Split transcripts longer than about \(chunkTokens.formatted()) tokens")
@@ -245,7 +259,7 @@ struct PromptSettings: View {
                 Text("\(model.mappings.count - customCount) student(s) use this prompt · \(customCount) use a custom prompt").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Preview Effective Instructions…") { showPreview = true }
-                Button("Reset to Starter Prompt…") { confirmReset = true }
+                Button("Restore Default Prompt…") { confirmReset = true }
                 Button("Revert") { draft = model.settings.globalPrompt }.disabled(draft == model.settings.globalPrompt)
                 Button("Save") { model.updateSettings { $0.globalPrompt = draft } }
                     .buttonStyle(.borderedProminent)
@@ -259,10 +273,10 @@ struct PromptSettings: View {
             PromptPreviewSheet(title: "Effective global instructions", subtitle: "Global prompt + required rules",
                                text: PromptLibrary.effectiveInstructions(basePrompt: draft))
         }
-        .alert("Reset the global prompt?", isPresented: $confirmReset) {
-            Button("Reset", role: .destructive) { draft = PromptLibrary.starterGlobalPrompt; model.updateSettings { $0.globalPrompt = draft } }
+        .alert("Restore the default prompt?", isPresented: $confirmReset) {
+            Button("Restore Default", role: .destructive) { draft = PromptLibrary.starterGlobalPrompt; model.updateSettings { $0.globalPrompt = draft } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Your edits to the global prompt will be replaced by the starter prompt.") }
+        } message: { Text("Your edits to the global prompt will be replaced by the built-in default prompt. Students with their own custom prompt are not affected.") }
     }
 }
 

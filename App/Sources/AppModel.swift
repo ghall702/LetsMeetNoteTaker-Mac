@@ -81,6 +81,8 @@ final class AppModel: ObservableObject {
     @Published var importRoots: [URL] = []
     @Published var showOnboarding = false
     @Published var banner: String?
+    /// Screenshot mode only: open the draft review sheet automatically.
+    @Published var demoReviewDraft = false
 
     @Published var hasWebsiteKey = false
     @Published var hasOpenAIKey = false
@@ -134,9 +136,9 @@ final class AppModel: ObservableObject {
                 guard let key = KeychainStore.get(.openAI) else { throw OpenAIError.missingKey }
                 let s = store.settings
                 guard !s.openAIModel.isEmpty else { throw OpenAIError.modelUnavailable("No OpenAI model selected in Settings.") }
-                let client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 600))
+                let client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
                 return OpenAINotesProducer(generator: NotesGenerator(performer: client, model: s.openAIModel, effort: s.reasoningEffort,
-                                                                     chunkThresholdTokens: s.chunkThresholdTokens))
+                                                                     chunkThresholdTokens: s.chunkThresholdTokens, maxOutputTokens: s.maxOutputTokens))
             },
             makeSubmitter: { @Sendable in
                 let s = store.settings
@@ -144,7 +146,12 @@ final class AppModel: ObservableObject {
                                           transport: URLSessionTransport(timeout: 300))
             },
             isOnline: { net.isOnline },
-            appVersion: AppInfo.version)
+            appVersion: AppInfo.version,
+            makeReplacer: { @Sendable in
+                let s = store.settings
+                return try LetsMeetClient(baseURLString: s.websiteBaseURL, apiKey: KeychainStore.get(.website) ?? "",
+                                          transport: URLSessionTransport(timeout: 300))
+            })
         engine = JobEngine(store: store, deps: deps, tempRoot: AppInfo.tempAudioDirectory)
         detection = DetectionMonitor(model: self)
     }
@@ -207,7 +214,7 @@ final class AppModel: ObservableObject {
         Task { await engine.setPaused(true) }
         progress = Dictionary(uniqueKeysWithValues: activeJobs.map { ($0.job.id, JobProgress(fraction: 0.42, message: "Transcribing (part 1 of 2)")) })
         switch demo {
-        case "history": sidebar = .history; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
+        case "history", "regenerate": sidebar = .history; demoReviewDraft = demo == "regenerate"; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
         case "students": sidebar = .students
         case "settings": sidebar = .settings
         case "onboarding": showOnboarding = true
@@ -255,6 +262,18 @@ final class AppModel: ObservableObject {
             if let l = store.lesson(containingJob: id) {
                 NotificationService.shared.notify(title: "Lesson notes need attention", body: "\(l.pupilName): \(message)", lessonId: l.id)
             }
+        case .replaced(let id):
+            progress[id] = nil
+            if let l = store.lesson(containingJob: id) {
+                NotificationService.shared.notify(title: "Lesson notes replaced",
+                                                  body: "\(l.pupilName), \(CoreFormat.longUKDate(l.lessonDate)) — the new version is waiting for approval on the website.",
+                                                  lessonId: l.id)
+            }
+        case .replacementNeedsAttention(let id, let message):
+            progress[id] = nil
+            if let l = store.lesson(containingJob: id) {
+                NotificationService.shared.notify(title: "Replacing notes needs attention", body: "\(l.pupilName): \(message)", lessonId: l.id)
+            }
         case .idle:
             break
         }
@@ -264,7 +283,9 @@ final class AppModel: ObservableObject {
 
     var allJobs: [LessonJob] { lessons.flatMap { l in l.jobs.map { LessonJob(lesson: l, job: $0) } } }
     var activeJobs: [LessonJob] { allJobs.filter { $0.job.stage.isActive }.sorted { $0.job.createdAt < $1.job.createdAt } }
-    var attentionJobs: [LessonJob] { allJobs.filter { $0.job.stage == .failed } }
+    var attentionJobs: [LessonJob] {
+        allJobs.filter { $0.job.stage == .failed || ($0.job.replacement.map { $0.state != .queued } ?? false) }
+    }
     var heldJobs: [LessonJob] { allJobs.filter { $0.job.stage == .held } }
     var isBusy: Bool { !activeJobs.isEmpty }
 
@@ -489,6 +510,62 @@ final class AppModel: ObservableObject {
 
     func deleteTranscript(_ job: Job) {
         store.deleteTranscript(jobId: job.id)
+    }
+
+    // MARK: Regeneration & replacement
+
+    /// Generates a new draft from the saved transcript with the chosen prompt/model.
+    /// Saved defaults are not changed.
+    func regenerate(_ job: Job, options: RegenerationOptions, model: String, effort: ReasoningEffort,
+                    progress: @escaping @Sendable (Double, String) -> Void) async throws -> NoteVersion {
+        guard let key = KeychainStore.get(.openAI) else { throw OpenAIError.missingKey }
+        let m = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !m.isEmpty else { throw OpenAIError.modelUnavailable("Choose a model.") }
+        let s = store.settings
+        let client = try OpenAIClient(apiKey: key, transport: URLSessionTransport(timeout: 900))
+        let producer = OpenAINotesProducer(generator: NotesGenerator(performer: client, model: m, effort: effort,
+                                                                     chunkThresholdTokens: s.chunkThresholdTokens, maxOutputTokens: s.maxOutputTokens))
+        let v = try await NotesRegeneration.regenerate(store: store, jobId: job.id, options: options, producer: producer, progress: progress)
+        reload()
+        return v
+    }
+
+    func discardDraft(_ job: Job, _ version: NoteVersion) {
+        NotesRegeneration.discard(store: store, jobId: job.id, versionId: version.id)
+        reload()
+    }
+
+    @discardableResult
+    func acceptDraft(_ job: Job, _ version: NoteVersion) throws -> NotesRegeneration.AcceptOutcome {
+        let outcome = try NotesRegeneration.accept(store: store, jobId: job.id, versionId: version.id)
+        reload()
+        Task { await engine.tick() }
+        return outcome
+    }
+
+    func replaceAnyway(_ job: Job) {
+        NotesRegeneration.replaceAnyway(store: store, jobId: job.id)
+        Task { await engine.tick() }
+    }
+
+    func keepWebsiteVersion(_ job: Job) {
+        NotesRegeneration.keepWebsiteVersion(store: store, jobId: job.id)
+    }
+
+    func retryReplacement(_ job: Job) {
+        NotesRegeneration.retryReplacement(store: store, jobId: job.id)
+        Task { await engine.tick() }
+    }
+
+    func submitAsNewNote(_ job: Job) {
+        do {
+            let l = try NotesRegeneration.submitAsNewNote(store: store, jobId: job.id, held: !settings.autoProcessAfterConfirm)
+            selectedLessonId = l.id
+            reload()
+            Task { await engine.tick() }
+        } catch {
+            banner = error.localizedDescription
+        }
     }
 
     func setPaused(_ paused: Bool) {
