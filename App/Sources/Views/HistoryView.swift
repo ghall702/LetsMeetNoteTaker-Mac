@@ -113,6 +113,81 @@ struct HistoryRow: View {
     }
 }
 
+/// Status of a queued website replacement, with the documented conflict choices.
+struct ReplacementCard: View {
+    @EnvironmentObject var model: AppModel
+    let rep: PendingReplacement
+    let job: Job
+
+    var conflictDetail: String {
+        var s = "Website version " + (rep.conflictCurrentVersion.map { String($0) } ?? "?")
+        if let who = rep.conflictChangedBy { s += ", changed by " + who }
+        if let raw = rep.conflictUpdatedAt, let d = CoreFormat.parseISO8601(raw) { s += " on " + d.shortDateTime }
+        return s + ". Replacing would overwrite those changes."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            content
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder var content: some View {
+        switch rep.state {
+        case .queued: queued
+        case .conflict: conflict
+        case .noteDeleted: deleted
+        case .failed: failed
+        }
+    }
+
+    var queued: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Replacing the notes on the website…").font(.callout.weight(.medium))
+            }
+            Text(rep.message ?? "").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    var conflict: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("This note was changed on the website since you generated this version", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange).font(.callout.weight(.medium))
+            Text(conflictDetail).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Keep Website Version") { model.keepWebsiteVersion(job) }
+                Button("Replace Anyway") { model.replaceAnyway(job) }.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    var deleted: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("This note has been deleted on the website", systemImage: "trash").foregroundStyle(.red).font(.callout.weight(.medium))
+            HStack {
+                Button("Discard Replacement") { model.keepWebsiteVersion(job) }
+                Button("Submit as New Note") { model.submitAsNewNote(job) }.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    var failed: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("The replacement could not be sent", systemImage: "exclamationmark.octagon.fill").foregroundStyle(.red).font(.callout.weight(.medium))
+            Text(rep.message ?? "").font(.caption).textSelection(.enabled)
+            HStack {
+                Button("Discard Replacement") { model.keepWebsiteVersion(job) }
+                Button("Retry") { model.retryReplacement(job) }.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+}
+
 struct RegenerateRequest: Identifiable {
     let id = UUID()
     var draftId: UUID?
@@ -310,9 +385,7 @@ struct JobSection: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(v.notes.title).lineLimit(1)
-                                Text("\(v.createdAt.shortDateTime) · \(v.kind == .original ? "original" : "regenerated") · \(v.model)"
-                                     + (v.websiteVersion.map { " · website v\($0)" } ?? ""))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(versionSubtitle(v)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             StatusChip(versionLabel(v.state), color: versionColor(v.state))
@@ -359,6 +432,12 @@ struct JobSection: View {
         }
     }
 
+    func versionSubtitle(_ v: NoteVersion) -> String {
+        var s = v.createdAt.shortDateTime + " · " + (v.kind == .original ? "original" : "regenerated") + " · " + v.model
+        if let w = v.websiteVersion { s += " · website v" + String(w) }
+        return s
+    }
+
     func versionLabel(_ s: NoteVersion.State) -> String {
         switch s {
         case .current: return "Current"
@@ -378,45 +457,8 @@ struct JobSection: View {
         }
     }
 
-    @ViewBuilder func replacementCard(_ rep: PendingReplacement) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch rep.state {
-            case .queued:
-                HStack {
-                    ProgressView().controlSize(.small)
-                    Text("Replacing the notes on the website…").font(.callout.weight(.medium))
-                }
-                if let m = rep.message { Text(m).font(.caption).foregroundStyle(.secondary) }
-            case .conflict:
-                Label("This note was changed on the website since you generated this version", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).font(.callout.weight(.medium))
-                Text("Website version \(rep.conflictCurrentVersion.map(String.init) ?? "?")"
-                     + (rep.conflictChangedBy.map { ", changed by \($0)" } ?? "")
-                     + (rep.conflictUpdatedAt.flatMap(CoreFormat.parseISO8601).map { " on \($0.shortDateTime)" } ?? "")
-                     + ". Replacing would overwrite those changes.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Button("Keep Website Version") { model.keepWebsiteVersion(job) }
-                    Button("Replace Anyway") { model.replaceAnyway(job) }.buttonStyle(.borderedProminent)
-                }
-            case .noteDeleted:
-                Label("This note has been deleted on the website", systemImage: "trash").foregroundStyle(.red).font(.callout.weight(.medium))
-                HStack {
-                    Button("Discard Replacement") { model.keepWebsiteVersion(job) }
-                    Button("Submit as New Note") { model.submitAsNewNote(job) }.buttonStyle(.borderedProminent)
-                }
-            case .failed:
-                Label("The replacement could not be sent", systemImage: "exclamationmark.octagon.fill").foregroundStyle(.red).font(.callout.weight(.medium))
-                if let m = rep.message { Text(m).font(.caption).textSelection(.enabled) }
-                HStack {
-                    Button("Discard Replacement") { model.keepWebsiteVersion(job) }
-                    Button("Retry") { model.retryReplacement(job) }.buttonStyle(.borderedProminent)
-                }
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    func replacementCard(_ rep: PendingReplacement) -> some View {
+        ReplacementCard(rep: rep, job: job)
     }
 
     @ViewBuilder var actions: some View {

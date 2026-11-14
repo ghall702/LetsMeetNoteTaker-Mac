@@ -155,15 +155,21 @@ struct RegenerateSheet: View {
 
     // MARK: Review
 
+    func describe(_ v: NoteVersion) -> String {
+        var s = "Generated " + v.createdAt.shortDateTime + " with " + v.model
+        if let e = v.effort, e != .modelDefault { s += " · effort " + e.label }
+        if v.promptSource == .temporary { s += " · temporary prompt" }
+        if v.additionalInstructions != nil { s += " · with additional instructions" }
+        return s
+    }
+
     @ViewBuilder func reviewView(_ versionId: UUID) -> some View {
         if let job, let draft = job.allNoteVersions.first(where: { $0.id == versionId }) {
             let current = job.currentVersion?.notes ?? job.notes ?? GeneratedNotes(title: "")
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Generated \(draft.createdAt.shortDateTime) with \(draft.model)" + (draft.effort.map { $0 == .modelDefault ? "" : " · effort \($0.label)" } ?? "")
-                             + (draft.promptSource == .temporary ? " · temporary prompt" : "") + (draft.additionalInstructions != nil ? " · with additional instructions" : ""))
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(describe(draft)).font(.caption).foregroundStyle(.secondary)
                         CompareNotesView(left: current, leftTitle: "Current notes", right: draft.notes, rightTitle: "New version", rightAdjustments: draft.adjustments)
                     }
                     .padding(20)
