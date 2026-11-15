@@ -231,6 +231,7 @@ export async function saveStats() {
 }
 
 export async function statsReport() {
+  await mkdir(DATA_DIR, { recursive: true }); // a fresh install may not have the folder yet
   const fs = await statfs(DATA_DIR);
   const total = fs.blocks * fs.bsize, free = fs.bfree * fs.bsize, avail = fs.bavail * fs.bsize;
   const days = Object.keys(stats.days).sort().slice(-62).map(date => ({ date, ...stats.days[date] }));

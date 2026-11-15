@@ -116,3 +116,18 @@ test("existing behaviour unchanged: expiry, forgery, size limit, missing files, 
     await stop(gw);
   }
 });
+
+test("stats work before the recordings folder exists (fresh install)", async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), "gw-"));
+  const dataDir = path.join(parent, "recordings-not-created-yet");
+  const port = 17000 + Math.floor(Math.random() * 1000);
+  const gw = await start(dataDir, port);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/stats?t=${token({ op: "stats" })}`);
+    assert.equal(r.status, 200);
+    const s = await r.json();
+    assert.ok(s.volume.total_bytes > 0);
+  } finally {
+    await stop(gw);
+  }
+});
