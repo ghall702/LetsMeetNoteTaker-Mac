@@ -83,7 +83,9 @@ struct AttachmentRowView: View {
             .disabled(!includeInContext)
             .help("Tells OpenAI what this file is")
             Toggle(isOn: $includeInContext) {
-                Text(includeInContext ? "Include in AI context" : "Include in AI context — off: uploaded for the pupil only, not sent to OpenAI")
+                Text(includeInContext ? "Include in AI context"
+                     : (contextOnly ? "Include in AI context — off: this context-only file is not used at all"
+                                    : "Include in AI context — off: uploaded for the pupil only, not sent to OpenAI"))
             }
             .toggleStyle(.checkbox)
             .help("Off: the file is only uploaded for the pupil; OpenAI never sees it")
