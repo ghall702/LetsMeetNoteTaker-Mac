@@ -1,5 +1,9 @@
 # Media gateway install (mediahub-lm-1.georgehalltuition.com)
 
+> **For the current VPS use [DEPLOY.md](DEPLOY.md)** (systemd next to the existing native SFTPGo and Caddy,
+> recordings on the 3 TB HDD). The Docker steps below start their own SFTPGo and Caddy and would clash with
+> the services already running there. Statistics: [STATS.md](STATS.md). Tests: `node --test test/gateway.test.mjs`.
+
 Nothing here has been deployed or tested on the VPS yet. The gateway itself was tested locally (upload, size limit, Range seeking, expired/forged/wrong-type links, delete).
 
 ## What runs

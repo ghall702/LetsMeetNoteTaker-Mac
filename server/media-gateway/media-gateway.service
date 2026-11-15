@@ -1,17 +1,33 @@
-# Alternative to Docker: sudo cp media-gateway.service /etc/systemd/system/ && sudo systemctl enable --now media-gateway
+# Media gateway as a systemd service, alongside the EXISTING native SFTPGo and Caddy on
+# mediahub-lm-1 (do not use docker-compose.yml there: it would start a second SFTPGo and Caddy).
+# Install: see DEPLOY.md.
 [Unit]
 Description=George Hall Tuition media gateway
-After=network.target
+After=network-online.target sftpgo.service
+Wants=network-online.target
+# Never start (and so never write) unless the 3 TB volume is mounted.
+RequiresMountsFor=/mnt/storage
 
 [Service]
-User=1000
-EnvironmentFile=/etc/media-gateway.env
+# Same owner as SFTPGo's files (check with: systemctl show -p User sftpgo).
+User=sftpgo
+Group=sftpgo
+# The shared secret already lives here (root-only file; systemd reads it before dropping privileges).
+EnvironmentFile=/opt/media-gateway/.env
+Environment=DATA_DIR=/srv/sftpgo/data/recordings
+Environment=PORT=8787
+Environment=STATS_TZ=Europe/London
+Environment=ALLOWED_ORIGINS=https://georgehalltuition.com,https://www.georgehalltuition.com,https://george-hall-reimagined.lovable.app
 ExecStart=/usr/bin/node /opt/media-gateway/gateway.mjs
 Restart=always
+RestartSec=3
 MemoryMax=256M
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/srv/sftpgo/data/recordings
+ProtectHome=true
+PrivateTmp=true
+# /srv/sftpgo/data is a symlink to the HDD; allow writes to the real directory only.
+ReadWritePaths=/mnt/storage/sftpgo/data/recordings
 
 [Install]
 WantedBy=multi-user.target

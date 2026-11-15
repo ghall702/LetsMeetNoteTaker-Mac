@@ -1,0 +1,22 @@
+# Replacement for /etc/caddy/Caddyfile on mediahub-lm-1 (native Caddy).
+# Gateway paths go to the media gateway; everything else still goes to SFTPGo's web UI on
+# 127.0.0.1:8080 exactly as before. Access logging stays off: query strings carry tokens.
+mediahub-lm-1.georgehalltuition.com {
+	header Strict-Transport-Security "max-age=31536000"
+	header -Server
+
+	@gateway path /u /v /stat /del /stats /health
+	handle @gateway {
+		reverse_proxy 127.0.0.1:8787 {
+			flush_interval -1
+			transport http {
+				read_timeout 4h
+				write_timeout 4h
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+}
