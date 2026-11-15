@@ -167,6 +167,15 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var lessonLengthError: String?
     /// "Write Notes Now": this job may use OpenAI even while OpenAI is paused.
     public var openAIOverride: Bool?
+    /// Lesson files (copies kept in the app's storage). Editable until notes are written.
+    public var attachments: [LessonAttachment]?
+    /// The files frozen with the upload payload (sent identically on every retry).
+    public var submittedAttachments: [LessonAttachment]?
+
+    /// Files can be added or removed until notes are written and the upload is prepared.
+    public var attachmentsEditable: Bool {
+        notes == nil && submissionPayload == nil && ![.submitted, .submitting, .cancelled].contains(stage)
+    }
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

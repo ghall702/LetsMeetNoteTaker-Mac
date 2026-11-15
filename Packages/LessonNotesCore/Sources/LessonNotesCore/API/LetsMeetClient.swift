@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Errors from the Let's Meet website API, carrying the server's message verbatim.
+/// Errors from the LetsMeet website API, carrying the server's message verbatim.
 public struct LetsMeetAPIError: Error, Equatable, LocalizedError, Sendable {
     public var httpStatus: Int
     public var code: String
@@ -48,7 +48,7 @@ public enum LetsMeetClientError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL: return "The website address must be a valid HTTPS URL."
-        case .missingKey: return "Add your Let's Meet website API key in Settings."
+        case .missingKey: return "Add your LetsMeet website API key in Settings."
         case .invalidKeyFormat: return "Website API keys start with “ghln_”."
         case .decoding(let m): return "Unexpected response from the website: \(m)"
         }
@@ -154,6 +154,23 @@ public struct LetsMeetClient: Sendable {
         var r = resp
         if r.replayed == nil { r.replayed = (status == 200) }
         return r
+    }
+
+    /// `POST /notes` as `multipart/form-data`: one `note` JSON part plus 0–5 `file_uploads`.
+    public func submit(body: Data, files: [UploadFile]) async throws -> NoteStatusResponse {
+        guard !files.isEmpty else { return try await submit(body: body) }
+        let boundary = MultipartBody.makeBoundary()
+        let multipart = MultipartBody.build(noteJSON: body, files: files, boundary: boundary)
+        guard multipart.count <= AttachmentRules.maxRequestBytes else {
+            throw LetsMeetAPIError(httpStatus: 413, code: "payload_too_large", message: AttachmentRules.Problem.requestTooLarge(multipart.count).localizedDescription)
+        }
+        var r = makeRequest("notes", method: "POST", body: multipart)
+        r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        r.timeoutInterval = 600
+        let (resp, status) = try await perform(r, okStatuses: [200, 201], as: NoteStatusResponse.self)
+        var out = resp
+        if out.replayed == nil { out.replayed = (status == 200) }
+        return out
     }
 
     /// `PATCH /notes/{note_id}` — replaces an existing note's content (returns it to pending).

@@ -4,16 +4,23 @@
 
 ### Install or update
 1. Quit Lesson Notes if it is running (menu bar icon → **Quit Lesson Notes**).
-2. Open the DMG and drag **Let's Meet Lesson Notes** onto **Applications** (choose **Replace** when updating — your settings, keys, students, prompts and history are kept).
+2. Open the DMG and drag **LetsMeet Lesson Notes** onto **Applications**. Your settings, keys, students, prompts, queue and history are kept.
+   **Updating from 1.5 or earlier:** the app has been renamed, so the old copy is not replaced automatically — after copying the new one, drag the old **Let's Meet Lesson Notes** from Applications to the Bin. Only ever run one copy.
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.5
+### What's in 1.6
+- **Lesson files:** attach up to 5 files to a lesson (PDF, Word, PowerPoint, Excel, text, CSV or images; up to 20 MB each) in the Confirm sheet or in History until the notes are written. They are uploaded with the note and pupils can download them once you approve it.
+- **Files as AI context:** for each file choose **Slides**, **Student work**, **My work (exemplar)** or **Other material**, and switch **Include in AI context** on or off. Included files go to OpenAI with the transcript, labelled with what they are. PDFs are sent as PDFs (OpenAI sees the text and the pages, including diagrams and handwriting), images as images, and Word/PowerPoint/Excel/text as their text. Excluded files are uploaded for the pupil only.
+- Files are copied into the app when added, so uploads and retries always send exactly the same files. Audio and video are never accepted.
+- Renamed to **LetsMeet Lesson Notes**.
+
+### Also in 1.5
 - **Pause OpenAI Activity** (Dashboard button, menu bar and Lessons menu): recordings keep being transcribed on this Mac, but no notes are written with OpenAI until you resume — so a long backlog can transcribe without using today's allowance. Lessons dated today still get notes unless you turn that off, and **Write Notes Now** lets any single lesson through. Notes that are already written still upload.
 - **Smoother app:** data is saved in the background instead of making the window wait (the cause of the spinning beachball, especially with a large history), and transcripts in History load in the background.
 
 ### Also in 1.4
-- **Lesson length on Let's Meet:** every new note now includes `lesson_length` (total recording time in whole seconds, capped at 12 hours; left out when unknown). Visible only to you in Admin Tools.
+- **Lesson length on LetsMeet:** every new note now includes `lesson_length` (total recording time in whole seconds, capped at 12 hours; left out when unknown). Visible only to you in Admin Tools.
 - **Existing notes backfilled automatically:** for notes already sent by earlier versions, the app quietly sets just the lesson length on the website, one at a time in the background. The notes themselves are **not** resent — their content, version and approval status stay exactly as they are. Notes deleted on the website are marked as such; rate limits are respected.
 - History shows each lesson's length and whether it is on the website.
 

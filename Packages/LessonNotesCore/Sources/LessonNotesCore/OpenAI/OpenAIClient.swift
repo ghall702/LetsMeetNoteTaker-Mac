@@ -101,13 +101,39 @@ public struct ResponsesRequest: Sendable, Equatable {
     public var userContent: String
     public var reasoningEffort: ReasoningEffort
     public var maxOutputTokens: Int?
+    /// Lesson files sent after the user text (extracted text, images or PDFs).
+    public var materials: [ContextMaterial]
 
-    public init(model: String, instructions: String, userContent: String, reasoningEffort: ReasoningEffort = .modelDefault, maxOutputTokens: Int? = nil) {
+    public init(model: String, instructions: String, userContent: String, reasoningEffort: ReasoningEffort = .modelDefault, maxOutputTokens: Int? = nil,
+                materials: [ContextMaterial] = []) {
         self.model = model
         self.instructions = instructions
         self.userContent = userContent
         self.reasoningEffort = reasoningEffort
         self.maxOutputTokens = maxOutputTokens
+        self.materials = materials
+    }
+
+    /// The user message content: plain text, or text followed by the lesson files.
+    var inputContent: Any {
+        guard !materials.isEmpty else { return userContent }
+        var parts: [[String: Any]] = [["type": "input_text", "text": userContent]]
+        for m in materials {
+            switch m.content {
+            case .text(let t, let truncated):
+                parts.append(["type": "input_text", "text": "LESSON FILE \(m.label). Text of the file:\n" + t
+                              + (truncated ? "\n[Only the first part of this long file is included here.]" : "")])
+            case .image(let mime, let b64):
+                parts.append(["type": "input_text", "text": "LESSON FILE \(m.label). The image follows."])
+                parts.append(["type": "input_image", "image_url": "data:\(mime);base64,\(b64)", "detail": "auto"])
+            case .pdf(let b64):
+                parts.append(["type": "input_text", "text": "LESSON FILE \(m.label). The PDF follows."])
+                parts.append(["type": "input_file", "filename": m.filename, "file_data": "data:application/pdf;base64,\(b64)"])
+            case .unreadable:
+                parts.append(["type": "input_text", "text": "LESSON FILE \(m.label). This file's contents could not be read; only its name is known."])
+            }
+        }
+        return parts
     }
 
     /// JSON body for `POST /v1/responses`. `store` is always false.
@@ -116,7 +142,7 @@ public struct ResponsesRequest: Sendable, Equatable {
             "model": model,
             "store": false,
             "instructions": instructions,
-            "input": [["role": "user", "content": userContent]],
+            "input": [["role": "user", "content": inputContent]],
             "text": NotesSchema.textFormat,
             "stream": stream,
         ]
@@ -281,7 +307,22 @@ public struct OpenAIClient: Sendable {
 
     /// Conservative fallback when the count endpoint is unavailable (≈ 3 characters per token plus schema overhead).
     public static func roughInputEstimate(_ req: ResponsesRequest) -> Int {
-        (req.instructions.utf8.count + req.userContent.utf8.count) / 3 + 800
+        (req.instructions.utf8.count + req.userContent.utf8.count) / 3 + 800 + req.materials.reduce(0) { $0 + roughTokens($1) }
+    }
+
+    static func roughTokens(_ m: ContextMaterial) -> Int {
+        switch m.content {
+        case .text(let t, _): return t.utf8.count / 3 + 50
+        case .image: return 1_600
+        case .pdf(let b64):
+            // Each PDF page is sent as text plus an image; estimate pages from the file.
+            let d = Data(base64Encoded: b64) ?? Data()
+            let s = String(decoding: d, as: UTF8.self)
+            let pages = max(1, s.components(separatedBy: "/Type /Page").count - 1 - (s.components(separatedBy: "/Type /Pages").count - 1)
+                               + s.components(separatedBy: "/Type/Page").count - 1 - (s.components(separatedBy: "/Type/Pages").count - 1))
+            return pages * 1_800
+        case .unreadable: return 50
+        }
     }
 
     func monitored(_ req: ResponsesRequest, _ body: (UsageCapture) async throws -> ResponsesResult) async throws -> ResponsesResult {

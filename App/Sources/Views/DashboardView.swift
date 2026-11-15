@@ -30,7 +30,7 @@ struct DashboardView: View {
     var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Let's Meet Lesson Notes").font(.title2.weight(.semibold))
+                Text("LetsMeet Lesson Notes").font(.title2.weight(.semibold))
                 Text(statusLine).foregroundStyle(.secondary)
             }
             Spacer()

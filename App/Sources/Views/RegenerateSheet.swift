@@ -207,7 +207,7 @@ struct RegenerateSheet: View {
                     Button("Cancel", role: .cancel) {}
                 } message: {
                     Text(job.stage == .submitted
-                         ? "The note on the Let's Meet website will be updated (no duplicate is created) and will return to Waiting for approval until you approve it again. The current version is kept in this Mac's version history."
+                         ? "The note on the LetsMeet website will be updated (no duplicate is created) and will return to Waiting for approval until you approve it again. The current version is kept in this Mac's version history."
                          : "The local notes will be replaced before they are submitted. The current version is kept in the version history.")
                 }
             }

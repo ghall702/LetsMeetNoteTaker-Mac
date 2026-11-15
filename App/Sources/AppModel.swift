@@ -193,7 +193,9 @@ final class AppModel: ObservableObject {
                 guard let key = KeychainStore.get(.website), !key.isEmpty else { throw LetsMeetClientError.missingKey }
                 return try LetsMeetClient(baseURLString: store.settings.websiteBaseURL, apiKey: key, transport: URLSessionTransport(timeout: 60))
             })
-        engine = JobEngine(store: store, deps: deps, tempRoot: AppInfo.tempAudioDirectory)
+        var engineDeps = deps
+        engineDeps.materialLoader = AppMaterials.loader
+        engine = JobEngine(store: store, deps: engineDeps, tempRoot: AppInfo.tempAudioDirectory)
         detection = DetectionMonitor(model: self)
     }
 
@@ -355,7 +357,7 @@ final class AppModel: ObservableObject {
     var setupIssues: [String] {
         if isDemo { return [] }
         var issues: [String] = []
-        if !hasWebsiteKey { issues.append("Add your Let's Meet website API key") }
+        if !hasWebsiteKey { issues.append("Add your LetsMeet website API key") }
         if !hasOpenAIKey { issues.append("Add your OpenAI API key") }
         if settings.openAIModel.isEmpty { issues.append("Choose an OpenAI model") }
         if transcriptionModelName == nil { issues.append("Download a transcription model") }
@@ -531,7 +533,8 @@ final class AppModel: ObservableObject {
     }
 
     /// Creates the lesson and queues it. Called by the confirmation sheet.
-    func confirm(_ c: LessonConfirmation, remember: MatchContext?, createMappingName: String?) throws {
+    @discardableResult
+    func confirm(_ c: LessonConfirmation, remember: MatchContext?, createMappingName: String?) throws -> Lesson {
         if let remember {
             if let id = c.studentId, var m = store.mapping(id: id) {
                 if MappingMatcher.applyRemember(remember, to: &m) { store.upsertMapping(m) }
@@ -547,7 +550,49 @@ final class AppModel: ObservableObject {
         detection.markHandled(c.sourceFolder)
         reload()
         Task { await engine.tick() }
+        return lesson
     }
+
+    // MARK: Lesson files
+
+    /// Copies files chosen in the Confirm sheet into every part of the lesson (off the main thread).
+    func attach(_ files: [PendingAttachment], to lesson: Lesson) async -> [String] {
+        let store = self.store
+        let jobIds = lesson.jobs.map(\.id)
+        return await Task.detached(priority: .userInitiated) { () -> [String] in
+            var failures: [String] = []
+            for f in files {
+                for id in jobIds {
+                    do { let a = try store.addAttachment(from: f.url, toJob: id, role: f.role)
+                         if !f.includeInContext { store.setAttachmentIncluded(jobId: id, id: a.id, included: false) } }
+                    catch { failures.append(error.localizedDescription); break }
+                }
+            }
+            return failures
+        }.value
+    }
+
+    func addFiles(_ urls: [URL], to job: Job) {
+        guard !urls.isEmpty else { return }
+        let store = self.store
+        Task {
+            let failures = await Task.detached(priority: .userInitiated) { () -> [String] in
+                var out: [String] = []
+                for u in urls {
+                    do { try store.addAttachment(from: u, toJob: job.id) } catch { out.append(error.localizedDescription) }
+                }
+                return out
+            }.value
+            if !failures.isEmpty { banner = failures.joined(separator: " ") }
+        }
+    }
+
+    func removeAttachment(job: Job, id: UUID) {
+        do { try store.removeAttachment(jobId: job.id, id: id) } catch { banner = error.localizedDescription }
+    }
+
+    func setAttachmentRole(job: Job, id: UUID, role: AttachmentRole) { store.setAttachmentRole(jobId: job.id, id: id, role: role) }
+    func setAttachmentIncluded(job: Job, id: UUID, included: Bool) { store.setAttachmentIncluded(jobId: job.id, id: id, included: included) }
 
     // MARK: Jobs
 
@@ -612,7 +657,8 @@ final class AppModel: ObservableObject {
         client.usageMonitor = usageMonitor
         let producer = OpenAINotesProducer(generator: NotesGenerator(performer: client, model: m, effort: effort,
                                                                      chunkThresholdTokens: s.chunkThresholdTokens, maxOutputTokens: s.maxOutputTokens))
-        let v = try await NotesRegeneration.regenerate(store: store, jobId: job.id, options: options, producer: producer, progress: progress)
+        let v = try await NotesRegeneration.regenerate(store: store, jobId: job.id, options: options, producer: producer,
+                                                       materialLoader: AppMaterials.loader, progress: progress)
         reload()
         return v
     }
@@ -726,4 +772,11 @@ final class AppModel: ObservableObject {
         selectedLessonId = id
         showMainWindow()
     }
+}
+
+/// Reads lesson files on the Mac: adds old Word .doc text (via AppKit) to the core loader.
+enum AppMaterials {
+    static let loader = MaterialLoader(legacyDocumentText: { url in
+        (try? NSAttributedString(url: url, options: [.documentType: NSAttributedString.DocumentType.docFormat], documentAttributes: nil))?.string
+    })
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Size limits enforced by the Let's Meet API. All values are UTF-8 **byte** counts.
+/// Size limits enforced by the LetsMeet API. All values are UTF-8 **byte** counts.
 /// If the website raises its limits, update these two constants.
 public enum APILimits {
     /// Maximum `transcript` field size: 5,000,000 bytes.

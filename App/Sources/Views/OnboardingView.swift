@@ -12,7 +12,7 @@ struct OnboardingView: View {
     @State private var keyError: String?
     @State private var busy = false
 
-    let titles = ["Welcome", "Let's Meet website", "Rooms", "OpenAI", "AI model", "Zoom folder", "Transcription model", "Students", "System prompt", "Done"]
+    let titles = ["Welcome", "LetsMeet website", "Rooms", "OpenAI", "AI model", "Zoom folder", "Transcription model", "Students", "System prompt", "Done"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,11 +48,11 @@ struct OnboardingView: View {
     @ViewBuilder var content: some View {
         switch step {
         case 0:
-            Text("Lesson Notes turns your Zoom lesson recordings into lesson notes for Let's Meet.").font(.title3)
+            Text("Lesson Notes turns your Zoom lesson recordings into lesson notes for LetsMeet.").font(.title3)
             Text("Before you start, here is exactly where information goes:").font(.headline)
             PrivacyPoints()
         case 1:
-            Text("Paste your Let's Meet website API key. Create one in Admin Tools → Lesson notes manager → Mac app connection.")
+            Text("Paste your LetsMeet website API key. Create one in Admin Tools → Lesson notes manager → Mac app connection.")
             SecretField(title: model.hasWebsiteKey ? "Key saved — paste a new one to replace it" : "ghln_…", text: $websiteKey)
             HStack {
                 Button("Save Key & Test Connection") {
@@ -105,7 +105,7 @@ struct OnboardingView: View {
             Text("Download a transcription model. Transcription runs on this Mac only. The recommended model for this Mac is marked.")
             TranscriptionSettings().frame(minHeight: 380)
         case 7:
-            Text("Link each pupil to their Let's Meet room. Add initials or meeting names so recordings are matched automatically (for example “DT” for Daniel).")
+            Text("Link each pupil to their LetsMeet room. Add initials or meeting names so recordings are matched automatically (for example “DT” for Daniel).")
             StudentsQuickSetup()
         case 8:
             Text("This is the default instruction given to the AI for every pupil. You can edit it now or later in Settings → Prompt, and give individual pupils their own prompt in Students.")

@@ -40,7 +40,7 @@ enum KeychainStore {
         var add = baseQuery(account)
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        add[kSecAttrLabel as String] = "Lesson Notes – \(account == .website ? "Let's Meet API key" : "OpenAI API key")"
+        add[kSecAttrLabel as String] = "Lesson Notes – \(account == .website ? "LetsMeet API key" : "OpenAI API key")"
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         guard addStatus == errSecSuccess else { throw KeychainError.unexpected(addStatus) }
     }

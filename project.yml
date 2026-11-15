@@ -14,7 +14,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    MARKETING_VERSION: "1.5.0"
+    MARKETING_VERSION: "1.6.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   LessonNotes:
@@ -31,7 +31,7 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleName: Lesson Notes
-        CFBundleDisplayName: Let's Meet Lesson Notes
+        CFBundleDisplayName: LetsMeet Lesson Notes
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleIconName: AppIcon

@@ -26,7 +26,7 @@ struct LessonNotesApp: App {
     @StateObject private var model = AppModel.shared
 
     var body: some Scene {
-        Window("Let's Meet Lesson Notes", id: "main") {
+        Window("LetsMeet Lesson Notes", id: "main") {
             MainWindow()
                 .environmentObject(model)
                 .environmentObject(model.whisper)

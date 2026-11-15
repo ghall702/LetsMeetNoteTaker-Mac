@@ -95,12 +95,14 @@ final class MockTranscriber: Transcribing, @unchecked Sendable {
 
 final class MockNotes: NotesProducing, @unchecked Sendable {
     let calls = Box<Int>(0)
+    let lastContext = Box<NotesRequestContext?>(nil)
     let lastInstructions = Box<String>("")
     let lastTranscript = Box<String>("")
     var failWith: Error?
     func produceNotes(transcript: String, context: NotesRequestContext, instructions: String,
                       progress: @escaping @Sendable (Double, String) -> Void) async throws -> ProducedNotes {
         calls.mutate { $0 += 1 }
+        lastContext.value = context
         lastInstructions.value = instructions
         lastTranscript.value = transcript
         if let failWith { throw failWith }
@@ -111,6 +113,11 @@ final class MockNotes: NotesProducing, @unchecked Sendable {
 
 final class MockSubmitter: NoteSubmitting, @unchecked Sendable {
     let bodies = Box<[Data]>([])
+    let files = Box<[[UploadFile]]>([])
+    func submit(body: Data, files f: [UploadFile]) async throws -> NoteStatusResponse {
+        files.mutate { $0.append(f) }
+        return try await submit(body: body)
+    }
     /// Results to return in order; the last one repeats.
     var results: [Result<NoteStatusResponse, Error>] = []
     func submit(body: Data) async throws -> NoteStatusResponse {

@@ -53,6 +53,8 @@ struct ConfirmationSheet: View {
     @State private var previewItem: RecordingRow?
     @State private var working = false
     @State private var suggestions: [StudentSuggestion] = []
+    @State private var files: [PendingAttachment] = []
+    @State private var fileError: String?
 
     var session: ProposedSession { request.session }
     var tz: TimeZone { model.settings.timeZone }
@@ -112,6 +114,23 @@ struct ConfirmationSheet: View {
                     }
                 } header: {
                     Text("Recordings")
+                }
+                Section {
+                    ForEach($files) { $f in
+                        AttachmentRowView(filename: f.filename, byteCount: f.byteCount, role: $f.role, includeInContext: $f.includeInContext,
+                                          onRemove: { files.removeAll { $0.id == f.id } })
+                    }
+                    HStack {
+                        Button("Add Files…") { addFiles(AttachmentPicker.choose()) }
+                            .disabled(files.count >= AttachmentRules.maxFiles)
+                        if let fileError { Text(fileError).font(.caption).foregroundStyle(.red) }
+                    }
+                } header: {
+                    Text("Lesson files (optional)")
+                } footer: {
+                    Text("Slides, the pupil's work or your model answers. Files marked for AI context go to OpenAI with the transcript; all of them are uploaded so the pupil can download them once you approve the notes."
+                         + (effectiveMode == .separate ? " With separate processing, the files are added to every part." : ""))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if selectedRows.count > 1 {
                     Section("How should these recordings be processed?") {
@@ -235,6 +254,19 @@ struct ConfirmationSheet: View {
         }
     }
 
+    func addFiles(_ urls: [URL]) {
+        fileError = nil
+        var problems: [String] = []
+        for u in urls {
+            guard files.count < AttachmentRules.maxFiles else { problems.append(AttachmentRules.Problem.tooMany.localizedDescription); break }
+            let name = AttachmentRules.sanitisedFilename(u.lastPathComponent)
+            let size = AttachmentPicker.size(u)
+            if let p = AttachmentRules.check(filename: name, byteCount: size) { problems.append(p.localizedDescription); continue }
+            files.append(PendingAttachment(url: u, filename: name, byteCount: size))
+        }
+        if !problems.isEmpty { fileError = problems.joined(separator: " ") }
+    }
+
     func confirm() async {
         error = nil
         guard let option = selectedOption, let mode = effectiveMode else { return }
@@ -281,8 +313,12 @@ struct ConfirmationSheet: View {
                                               lessonDate: dateString, startedAt: started, dateSource: source, mode: mode,
                                               meetingTopic: session.topic, sourceFolder: session.folderPath, recordings: refs)
         do {
-            try model.confirm(confirmation, remember: remember ? MatchContext(session: session) : nil,
-                              createMappingName: option.mappingId == nil ? option.roomName : nil)
+            let lesson = try model.confirm(confirmation, remember: remember ? MatchContext(session: session) : nil,
+                                           createMappingName: option.mappingId == nil ? option.roomName : nil)
+            if !files.isEmpty {
+                let failures = await model.attach(files, to: lesson)
+                if !failures.isEmpty { model.banner = "Some lesson files could not be added: " + failures.joined(separator: " ") }
+            }
             dismiss()
         } catch {
             self.error = error.localizedDescription

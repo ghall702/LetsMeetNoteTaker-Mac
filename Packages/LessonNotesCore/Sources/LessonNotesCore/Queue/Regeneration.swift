@@ -37,23 +37,27 @@ public enum RegenerationError: Error, LocalizedError, Equatable {
 /// Regenerating notes from the saved local transcript (no re-transcription), local version
 /// history, and queuing replacements of website notes.
 public enum NotesRegeneration {
-    static func context(for lesson: Lesson, job: Job, mapping: StudentMapping?) -> NotesRequestContext {
+    static func context(for lesson: Lesson, job: Job, mapping: StudentMapping?, materials: [ContextMaterial] = []) -> NotesRequestContext {
         let recs = lesson.recordings(for: job)
         let summary = recs.count > 1
             ? "\(recs.count) recordings combined in order (\(recs.map(\.filename).joined(separator: ", ")))"
             : (recs.first.map { "\($0.filename), \(CoreFormat.duration($0.durationSec))" } ?? "")
         return NotesRequestContext(pupilName: lesson.pupilName, pupilContext: mapping?.context ?? "",
-                                   lessonDate: lesson.lessonDate, recordingSummary: summary)
+                                   lessonDate: lesson.lessonDate, recordingSummary: summary, materials: materials)
     }
 
     /// Generates a complete new version of every field and stores it as a draft for review.
     /// The saved prompts and default model are not changed.
     @discardableResult
     public static func regenerate(store: LibraryStore, jobId: UUID, options: RegenerationOptions, producer: NotesProducing,
+                                  materialLoader: MaterialLoader = MaterialLoader(),
                                   now: Date = Date(), progress: @escaping @Sendable (Double, String) -> Void = { _, _ in }) async throws -> NoteVersion {
         guard let lesson = store.lesson(containingJob: jobId), let job = lesson.jobs.first(where: { $0.id == jobId }) else { throw RegenerationError.jobNotFound }
         guard job.hasTranscript, let transcript = store.transcript(jobId: jobId) else { throw RegenerationError.transcriptMissing }
         let mapping = store.mapping(id: lesson.studentId)
+        // The lesson's files (as uploaded, if already uploaded) are used as context again.
+        let files = job.submittedAttachments ?? job.attachments ?? []
+        let materials = files.filter(\.includeInContext).map { materialLoader.load($0, at: store.attachmentURL(jobId: jobId, $0)) }
         let prompt: ResolvedPrompt
         switch options.prompt {
         case .current:
@@ -64,7 +68,7 @@ public enum NotesRegeneration {
         }
         let produced = try await UsageContext.$current.withValue(UsageContext(lessonId: lesson.id, jobId: jobId, purpose: .regenerate)) {
             try await producer.produceNotes(transcript: transcript.renderedText(timeZone: lesson.timeZone),
-                                            context: context(for: lesson, job: job, mapping: mapping),
+                                            context: context(for: lesson, job: job, mapping: mapping, materials: materials),
                                             instructions: prompt.effectiveInstructions, progress: progress)
         }
         let extra = options.additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines)

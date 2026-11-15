@@ -42,7 +42,7 @@ public enum LessonFactoryError: Error, LocalizedError, Equatable {
         switch self {
         case .noRecordings: return "Select at least one recording."
         case .singleNeedsOneRecording: return "Single mode processes exactly one recording. Choose Combine or Separate for several."
-        case .invalidRoom: return "Choose a pupil whose Let's Meet room still exists."
+        case .invalidRoom: return "Choose a pupil whose LetsMeet room still exists."
         case .invalidDate: return "Enter a valid lesson date."
         case .tooManyRecordings: return "A single note can list at most 20 recordings."
         }

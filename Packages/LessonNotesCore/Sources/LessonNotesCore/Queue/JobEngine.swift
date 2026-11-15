@@ -42,6 +42,15 @@ public protocol NotesProducing: Sendable {
 
 public protocol NoteSubmitting: Sendable {
     func submit(body: Data) async throws -> NoteStatusResponse
+    /// `multipart/form-data` submission with lesson files (`file_uploads`).
+    func submit(body: Data, files: [UploadFile]) async throws -> NoteStatusResponse
+}
+
+extension NoteSubmitting {
+    public func submit(body: Data, files: [UploadFile]) async throws -> NoteStatusResponse {
+        precondition(files.isEmpty, "this submitter cannot upload files")
+        return try await submit(body: body)
+    }
 }
 
 extension LetsMeetClient: NoteSubmitting {}
@@ -83,6 +92,8 @@ public struct EngineDependencies: Sendable {
     /// macOS memory pressure (the app wires this to a DispatchSource); reduces new transcriptions.
     public var memoryPressure: @Sendable () -> MemoryPressureLevel
     public var makeLessonLengthSetter: (@Sendable () throws -> LessonLengthSetting)?
+    /// Prepares lesson files as OpenAI context.
+    public var materialLoader = MaterialLoader()
 
     public init(extractor: AudioExtracting, transcriber: Transcribing, makeNotesProducer: @escaping @Sendable () throws -> NotesProducing,
                 makeSubmitter: @escaping @Sendable () throws -> NoteSubmitting, isOnline: @escaping @Sendable () -> Bool, appVersion: String,
@@ -573,8 +584,9 @@ public actor JobEngine {
         let summary = recs.count > 1
             ? "\(recs.count) recordings combined in order (\(recs.map(\.filename).joined(separator: ", ")))"
             : (recs.first.map { "\($0.filename), \(CoreFormat.duration($0.durationSec))" } ?? "")
+        let materials = (job.attachments ?? []).filter(\.includeInContext).map { deps.materialLoader.load($0, at: store.attachmentURL(jobId: job.id, $0)) }
         let context = NotesRequestContext(pupilName: lesson.pupilName, pupilContext: mapping?.context ?? "",
-                                          lessonDate: lesson.lessonDate, recordingSummary: summary)
+                                          lessonDate: lesson.lessonDate, recordingSummary: summary, materials: materials)
         let jobId = job.id
         let handler = eventHandler
         let produced = try await UsageContext.$current.withValue(UsageContext(lessonId: lesson.id, jobId: jobId, purpose: .lessonNotes)) {
@@ -613,14 +625,27 @@ public actor JobEngine {
             }
             let issues = SubmissionValidator.validate(submission)
             if !issues.isEmpty { throw PipelineError.invalidSubmission(issues.map(\.description).joined(separator: "; ")) }
+            let files = job.attachments ?? []
+            if let problem = AttachmentRules.check(files, noteJSONBytes: body.count) {
+                throw PipelineError.invalidSubmission(problem.localizedDescription)
+            }
             payload = body
-            update(job.id) { $0.submissionPayload = body }
+            // The note JSON and its files are frozen together, so retries send identical content.
+            update(job.id) { $0.submissionPayload = body; $0.submittedAttachments = files }
         }
-        update(job.id) { $0.statusMessage = "Uploading notes and full transcript" }
-        emit(.progress(jobId: job.id, fraction: 0.5, message: "Uploading notes and full transcript"))
+        let frozenFiles = store.job(id: job.id)?.submittedAttachments ?? []
+        var uploads: [UploadFile] = []
+        for a in frozenFiles {
+            do { uploads.append(UploadFile(filename: a.filename, contentType: a.contentType, data: try store.attachmentData(jobId: job.id, a))) }
+            catch { throw PipelineError.invalidSubmission(error.localizedDescription) }
+        }
+        let what = uploads.isEmpty ? "Uploading notes and full transcript"
+            : "Uploading notes, full transcript and \(uploads.count) file\(uploads.count == 1 ? "" : "s")"
+        update(job.id) { $0.statusMessage = what }
+        emit(.progress(jobId: job.id, fraction: 0.5, message: what))
         let submitter = try deps.makeSubmitter()
         store.flush() // the frozen payload must be on disk before it is sent (idempotent retries)
-        let response = try await submitter.submit(body: payload!)
+        let response = uploads.isEmpty ? try await submitter.submit(body: payload!) : try await submitter.submit(body: payload!, files: uploads)
         update(job.id) {
             $0.noteId = response.noteId
             $0.remoteStatus = response.status

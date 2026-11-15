@@ -2,12 +2,12 @@
 
 <img src="docs/images/icon.png" width="128" alt="Lesson Notes app icon">
 
-# Let's Meet Lesson Notes
+# LetsMeet Lesson Notes
 
 **Turns Zoom lesson recordings into polished, accurate lesson notes — transcribed privately on your Mac.**
 
 A native macOS menu-bar app for George Hall Tuition. It finds new Zoom recordings, transcribes them on-device,
-writes structured revision notes with OpenAI and sends them to Let's Meet, where they wait for approval.
+writes structured revision notes with OpenAI and sends them to LetsMeet, where they wait for approval.
 
 [![Download for Mac](https://img.shields.io/badge/Download-macOS%20DMG-0A84FF?style=for-the-badge&logo=apple&logoColor=white)](../../releases)
 &nbsp;
@@ -41,7 +41,7 @@ flowchart LR
     C --> D["🎙️ Transcribe on-device<br/>WhisperKit"]
     D --> E["✍️ Write notes<br/>OpenAI · strict JSON"]
     E --> F["📤 Upload notes +<br/>full transcript"]
-    F --> G["⏳ Waiting for approval<br/>on Let's Meet"]
+    F --> G["⏳ Waiting for approval<br/>on LetsMeet"]
     G -. "Regenerate & Replace" .-> E
 ```
 
@@ -79,6 +79,7 @@ Audio and video never leave the Mac.
 - Markdown headings, lists, tables and bold, previewed exactly as pupils see them
 - Strict empty-field rules: nothing invented, no "None" filler
 - Global prompt plus optional **per-pupil prompts**
+- **Lesson files** (slides, pupil work, your exemplars) used as AI context and shared with the pupil
 
 </td>
 <td valign="top">
@@ -86,7 +87,7 @@ Audio and video never leave the Mac.
 ### 🔁 Review, regenerate, replace
 - **Regenerate Notes** from the saved transcript — choose a prompt, model and extra instructions
 - **Side-by-side comparison** with changed sections highlighted
-- **Replace Existing Notes** on Let's Meet (no duplicates), safe retries and version-conflict handling
+- **Replace Existing Notes** on LetsMeet (no duplicates), safe retries and version-conflict handling
 - Local version history
 
 </td>
@@ -109,7 +110,7 @@ Audio and video never leave the Mac.
 - Duplicate-recording warnings using SHA-256
 - Full transcript always uploaded, with UTF-8 size limits enforced
 - **OpenAI usage counter** with optional free-allowance protection
-- Lesson length sent to Let's Meet (admin-only)
+- Lesson length sent to LetsMeet (admin-only)
 
 </td>
 </tr>
@@ -140,7 +141,7 @@ Audio and video never leave the Mac.
 ## Install
 
 1. Download the latest **`.dmg`** from [**Releases**](../../releases).
-2. Open it and drag **Let's Meet Lesson Notes** onto **Applications**.
+2. Open it and drag **LetsMeet Lesson Notes** onto **Applications**.
 3. **First launch:** the app is not notarised yet, so macOS blocks it once. Open
    **System Settings → Privacy & Security** and click **Open Anyway**.
 4. Follow the **Setup Assistant**: website key, rooms, OpenAI key and model, Zoom folder, transcription model, students and prompt.
@@ -154,8 +155,9 @@ Audio and video never leave the Mac.
 | Data | Where it goes |
 | --- | --- |
 | 🎥 Recordings & audio | **Stay on your Mac.** Audio is extracted to a temporary file and deleted after each lesson; originals are never deleted. |
-| 📝 Transcript text | OpenAI (to write the notes, `store: false`) and Let's Meet (stored for you in Admin Tools; never shown to pupils). |
-| 📚 Lesson notes | Let's Meet — pupils only see notes **after you approve them**. Private tutor notes are never shown to pupils. |
+| 📝 Transcript text | OpenAI (to write the notes, `store: false`) and LetsMeet (stored for you in Admin Tools; never shown to pupils). |
+| 📎 Lesson files | Copied into the app when you add them. Uploaded to LetsMeet with the note (pupils can download them after you approve). Files you mark **Include in AI context** are also sent to OpenAI with the transcript (`store: false`). Audio and video are never accepted. |
+| 📚 Lesson notes | LetsMeet — pupils only see notes **after you approve them**. Private tutor notes are never shown to pupils. |
 | 🔑 API keys | macOS Keychain only. |
 | 📊 Analytics | None. Transcripts, notes and keys are never logged. |
 

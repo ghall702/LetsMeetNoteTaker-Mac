@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Let's Meet room as returned by `GET /rooms`.
+/// A LetsMeet room as returned by `GET /rooms`.
 public struct Room: Codable, Hashable, Identifiable, Sendable {
     public var roomId: String
     public var name: String

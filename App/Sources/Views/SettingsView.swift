@@ -28,7 +28,7 @@ struct WebsiteSettings: View {
 
     var body: some View {
         Form {
-            Section("Let's Meet website") {
+            Section("LetsMeet website") {
                 TextField("Website address", text: $baseURL)
                     .onSubmit(saveURL)
                 HStack {
@@ -546,7 +546,7 @@ struct PrivacyPoints: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Recordings and audio stay on this Mac. Transcription happens on-device; extracted audio is temporary and deleted after each job. Original Zoom recordings are never deleted.", systemImage: "desktopcomputer")
             Label("OpenAI receives the transcript text and lesson context (pupil name, date) to write the notes, using your own API key with store: false.", systemImage: "sparkles")
-            Label("The Let's Meet website receives the notes, private tutor notes, the complete transcript and recording file names/metadata. New notes wait for your approval; pupils only ever see approved pupil-facing notes.", systemImage: "globe")
+            Label("The LetsMeet website receives the notes, private tutor notes, the complete transcript and recording file names/metadata. New notes wait for your approval; pupils only ever see approved pupil-facing notes.", systemImage: "globe")
             Label("API keys are kept in the macOS Keychain. Transcripts, notes and keys are never written to logs. No analytics or other third parties.", systemImage: "key")
             Label("Local transcripts follow your retention setting and can be deleted from History at any time. Deleting local data never deletes website records.", systemImage: "trash")
         }

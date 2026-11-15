@@ -373,12 +373,98 @@ public final class LibraryStore: @unchecked Sendable {
     public func deleteLesson(id: UUID) {
         lock.lock()
         if let l = lessons.first(where: { $0.id == id }) {
-            for j in l.jobs { deleteTranscriptFile(jobId: j.id) }
+            for j in l.jobs {
+                deleteTranscriptFile(jobId: j.id)
+                try? FileManager.default.removeItem(at: attachmentsDir.appendingPathComponent(j.id.uuidString, isDirectory: true))
+            }
         }
         lessons.removeAll { $0.id == id }
         saveLibrary()
         lock.unlock()
         changed()
+    }
+
+    // MARK: Lesson files
+
+    var attachmentsDir: URL { directory.appendingPathComponent("attachments", isDirectory: true) }
+
+    public enum AttachmentError: Error, LocalizedError, Equatable {
+        case notEditable
+        case missing(String)
+        case changed(String)
+        public var errorDescription: String? {
+            switch self {
+            case .notEditable: return "Files can't be changed once the notes have been written or uploaded."
+            case .missing(let n): return "The lesson file “\(n)” is missing from the app's storage. Remove it or add it again."
+            case .changed(let n): return "The stored copy of “\(n)” has changed since it was added. Remove it and add it again."
+            }
+        }
+    }
+
+    public func attachmentURL(jobId: UUID, _ a: LessonAttachment) -> URL {
+        attachmentsDir.appendingPathComponent(jobId.uuidString, isDirectory: true)
+            .appendingPathComponent(a.id.uuidString, isDirectory: true)
+            .appendingPathComponent(a.filename)
+    }
+
+    /// Copies a file into the app's storage and adds it to the job (call off the main thread).
+    /// The original file is never changed.
+    @discardableResult
+    public func addAttachment(from source: URL, toJob jobId: UUID, role: AttachmentRole = .other, now: Date = Date()) throws -> LessonAttachment {
+        guard let job = job(id: jobId), job.attachmentsEditable else { throw AttachmentError.notEditable }
+        if (job.attachments ?? []).count >= AttachmentRules.maxFiles { throw AttachmentRules.Problem.tooMany }
+        let name = AttachmentRules.sanitisedFilename(source.lastPathComponent)
+        let size = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.intValue ?? 0
+        if let p = AttachmentRules.check(filename: name, byteCount: size) { throw p }
+        let data = try Data(contentsOf: source)
+        if let p = AttachmentRules.check(filename: name, byteCount: data.count) { throw p }
+        let a = LessonAttachment(filename: name, byteCount: data.count, sha256: SHA256Hasher.hex(of: data), role: role, addedAt: now)
+        let url = attachmentURL(jobId: jobId, a)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: [.atomic])
+        var added = false
+        var problem: Error?
+        updateJob(id: jobId, now: now) { j in
+            guard j.attachmentsEditable else { problem = AttachmentError.notEditable; return }
+            guard (j.attachments ?? []).count < AttachmentRules.maxFiles else { problem = AttachmentRules.Problem.tooMany; return }
+            j.attachments = (j.attachments ?? []) + [a]
+            added = true
+        }
+        if !added {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            throw problem ?? AttachmentError.notEditable
+        }
+        return a
+    }
+
+    public func removeAttachment(jobId: UUID, id: UUID) throws {
+        guard let job = job(id: jobId), job.attachmentsEditable else { throw AttachmentError.notEditable }
+        guard let a = job.attachments?.first(where: { $0.id == id }) else { return }
+        updateJob(id: jobId) { $0.attachments?.removeAll { $0.id == id } }
+        try? FileManager.default.removeItem(at: attachmentURL(jobId: jobId, a).deletingLastPathComponent())
+    }
+
+    /// The file's type only affects what OpenAI is told, so it can be changed at any time.
+    public func setAttachmentRole(jobId: UUID, id: UUID, role: AttachmentRole) {
+        updateJob(id: jobId) { j in
+            if let i = j.attachments?.firstIndex(where: { $0.id == id }) { j.attachments?[i].role = role }
+            if let i = j.submittedAttachments?.firstIndex(where: { $0.id == id }) { j.submittedAttachments?[i].role = role }
+        }
+    }
+
+    /// Whether OpenAI sees the file; it is uploaded for the pupil either way. Can change at any time.
+    public func setAttachmentIncluded(jobId: UUID, id: UUID, included: Bool) {
+        updateJob(id: jobId) { j in
+            if let i = j.attachments?.firstIndex(where: { $0.id == id }) { j.attachments?[i].includeInContext = included }
+            if let i = j.submittedAttachments?.firstIndex(where: { $0.id == id }) { j.submittedAttachments?[i].includeInContext = included }
+        }
+    }
+
+    /// The stored bytes, checked against the SHA-256 recorded when the file was added.
+    public func attachmentData(jobId: UUID, _ a: LessonAttachment) throws -> Data {
+        guard let d = try? Data(contentsOf: attachmentURL(jobId: jobId, a)) else { throw AttachmentError.missing(a.filename) }
+        guard SHA256Hasher.hex(of: d) == a.sha256 else { throw AttachmentError.changed(a.filename) }
+        return d
     }
 
     // MARK: Transcripts

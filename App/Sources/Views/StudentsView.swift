@@ -53,7 +53,7 @@ struct StudentsView: View {
                 } else {
                     VStack(spacing: 8) {
                         Text("Select a student, or add one").foregroundStyle(.secondary)
-                        Text("Rooms are loaded from the Let's Meet website. Students are matched to Zoom meetings by room name, initials, meeting name rules or patterns.")
+                        Text("Rooms are loaded from the LetsMeet website. Students are matched to Zoom meetings by room name, initials, meeting name rules or patterns.")
                             .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 360)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -119,7 +119,7 @@ struct StudentEditor: View {
                     TextField("Context for notes (e.g. Year 5, GCSE English Language)", text: $draft.context)
                     Toggle("Enabled for matching", isOn: $draft.enabled)
                 }
-                Section("Let's Meet room") {
+                Section("LetsMeet room") {
                     Picker("Room", selection: $draft.roomId) {
                         if !model.rooms.contains(draft.roomId) {
                             Text(draft.roomId.isEmpty ? "Choose a room…" : "\(draft.roomName) (no longer exists)").tag(draft.roomId)

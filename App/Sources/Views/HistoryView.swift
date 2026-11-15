@@ -408,6 +408,8 @@ struct JobSection: View {
                 }
             }
 
+            JobAttachmentsSection(job: job)
+
             if job.hasTranscript, let loaded = transcriptText, loaded.jobId == job.id {
                 let text = loaded.text
                 DisclosureGroup(isExpanded: $showTranscript) {
