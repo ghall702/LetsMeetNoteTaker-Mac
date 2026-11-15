@@ -1,0 +1,12 @@
+mediahub-lm-1.georgehalltuition.com {
+	header Strict-Transport-Security "max-age=31536000"
+	header -Server
+	# Access logging is off on purpose: query strings carry short-lived tokens.
+	reverse_proxy host.docker.internal:8787 {
+		flush_interval -1
+		transport http {
+			read_timeout 4h
+			write_timeout 4h
+		}
+	}
+}

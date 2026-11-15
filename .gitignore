@@ -7,3 +7,8 @@ xcuserdata/
 .DS_Store
 *.dmg
 .swiftpm/
+
+# Secrets never committed
+.env
+*.env
+!*.env.example

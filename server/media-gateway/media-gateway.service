@@ -1,0 +1,17 @@
+# Alternative to Docker: sudo cp media-gateway.service /etc/systemd/system/ && sudo systemctl enable --now media-gateway
+[Unit]
+Description=George Hall Tuition media gateway
+After=network.target
+
+[Service]
+User=1000
+EnvironmentFile=/etc/media-gateway.env
+ExecStart=/usr/bin/node /opt/media-gateway/gateway.mjs
+Restart=always
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/sftpgo/data/recordings
+
+[Install]
+WantedBy=multi-user.target
