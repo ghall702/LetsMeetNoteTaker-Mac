@@ -1,6 +1,10 @@
 # Deploying the media gateway on mediahub-lm-1
 
-Status: **not deployed.** These steps add the gateway next to the existing services. They do not
+Status (15 Nov 2026): **the original gateway is deployed** (by Grok, systemd, recordings on the HDD) and
+uploads/playback/deletion work end to end. The **statistics** need this folder's updated `gateway.mjs` and a
+Caddy route for `/stats` — see “Updating an existing deployment” below. A fresh install follows steps 0–6.
+
+These steps add the gateway next to the existing services. They do not
 reinstall or reconfigure SFTPGo, and the only change to Caddy is routing six gateway paths to the gateway.
 Run them over SSH as root, after reviewing each step.
 
@@ -85,6 +89,26 @@ curl -s -o /dev/null -w '%{http_code}\n' https://mediahub-lm-1.georgehalltuition
 5. Once the website's `/media/stats` endpoint exists, the app's Videos dashboard shows live storage and traffic.
 
 Only then start the historical backfill from the app.
+
+## Updating an existing deployment (adds /stats)
+
+Today `https://mediahub-lm-1.georgehalltuition.com/stats` returns a plain `{"message":"Not Found"}`, so either
+the deployed `gateway.mjs` is the original version or Caddy doesn't send `/stats` to it (or both).
+
+```bash
+systemctl cat media-gateway                     # note ExecStart path, User, DATA_DIR, ReadWritePaths
+cp /opt/media-gateway/gateway.mjs /opt/media-gateway/gateway.mjs.bak-$(date +%F)
+diff /opt/media-gateway/gateway.mjs.bak-$(date +%F) gateway.mjs | head    # only the statistics additions
+install -m 0644 gateway.mjs /opt/media-gateway/gateway.mjs
+# Counters are written to $DATA_DIR/.gateway-stats (on the HDD); that path must be inside ReadWritePaths.
+grep -n 'reverse_proxy' /etc/caddy/Caddyfile    # make sure /stats is routed to the gateway like /u and /v
+caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
+systemctl restart media-gateway && sleep 2 && systemctl status media-gateway --no-pager
+curl -s -o /dev/null -w '%{http_code}\n' https://mediahub-lm-1.georgehalltuition.com/stats   # 403 = live, needs a token
+```
+
+Then LetsMeet needs `GET /api/public/lesson-notes/media/stats` (STATS.md §2). Traffic history starts from this
+restart; earlier traffic isn't known.
 
 ## Rollback
 

@@ -585,6 +585,20 @@ struct VideoSettingsView: View {
                 Text("Retries wait 30 s, 1 min, 5 min, 15 min, 30 min, then hourly, and always respect LetsMeet's “retry after”. Nothing completed is redone.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Dashboard") {
+                Picker("Refresh server statistics", selection: Binding(get: { model.settings.video.statsRefreshSeconds }, set: { v in model.updateSettings { $0.video.statsRefreshSeconds = v }; model.scheduleStatsTimer() })) {
+                    Text("Every 30 seconds").tag(30)
+                    Text("Every minute").tag(60)
+                    Text("Every 2 minutes").tag(120)
+                    Text("Every 5 minutes").tag(300)
+                }
+                Picker("Show sizes in", selection: Binding(get: { model.settings.video.byteUnit }, set: { v in model.updateSettings { $0.video.byteUnit = v } })) {
+                    ForEach(ByteUnit.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle("Show uploads and playback separately", isOn: Binding(get: { model.settings.video.separateTraffic }, set: { v in model.updateSettings { $0.video.separateTraffic = v } }))
+                Stepper("Warn when less than \(model.settings.video.lowSpacePercent)% of storage is free", value: Binding(get: { model.settings.video.lowSpacePercent }, set: { v in model.updateSettings { $0.video.lowSpacePercent = v } }), in: 1...50)
+                Text("Server statistics are only fetched while the Videos page is open.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("Joined videos") {
                 LabeledContent("Saved in") {
                     Text(model.videoFolder.url.path).font(.caption).textSelection(.enabled).lineLimit(2).truncationMode(.middle)

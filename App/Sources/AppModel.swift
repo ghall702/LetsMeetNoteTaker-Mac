@@ -78,6 +78,14 @@ final class AppModel: ObservableObject {
     @Published var isScanningBackfill = false
     @Published var probeDone = 0
     @Published var probeTotal = 0
+    @Published var statsSnapshot = MediaStatsSnapshot()
+    @Published var isRefreshingStats = false
+    private(set) var mediaStatsCache: MediaStatsCache!
+    private(set) var transferLog: VideoTransferLog!
+    var statsTimer: Timer?
+    var statsViewers = 0
+    /// Latest samples per upload (not published; the UI is updated a few times a second).
+    var progressSamples: [UUID: VideoProgress] = [:]
     private var transcriber: WhisperTranscriber!
     private var watcher: FolderWatcher?
     private var watchedFolderURL: URL?
@@ -209,13 +217,17 @@ final class AppModel: ObservableObject {
         // Lesson videos: a separate queue, using the same LetsMeet key and signed upload URLs.
         videoFolder.configure(settings: store.settings.video)
         let folder = videoFolder
+        mediaStatsCache = MediaStatsCache(directory: store.directory)
+        statsSnapshot = mediaStatsCache.snapshot
+        transferLog = VideoTransferLog(directory: store.directory, timeZone: store.settings.timeZone)
+        let tlog = transferLog
         videoEngine = VideoUploadEngine(store: store, deps: VideoDependencies(
             makeAPI: { @Sendable in
                 guard let key = KeychainStore.get(.website), !key.isEmpty else { throw LetsMeetClientError.missingKey }
                 return try LetsMeetClient(baseURLString: store.settings.websiteBaseURL, apiKey: key, transport: URLSessionTransport(timeout: 120))
             },
             media: AVVideoMedia(), uploader: URLSessionSignedUploader(),
-            isOnline: { net.isOnline }, videosDirectory: { folder.url }))
+            isOnline: { net.isOnline }, videosDirectory: { folder.url }, transferLog: tlog))
         detection = DetectionMonitor(model: self)
     }
 
@@ -291,9 +303,7 @@ final class AppModel: ObservableObject {
         case "usage": sidebar = .usage
         case "videos": sidebar = .videos
             backfillReport = VideoBackfill.scan(store: store) { $0.fileSize > 0 ? $0.fileSize : nil }
-            for item in allJobs where item.job.video?.stage == .uploading {
-                videoProgress[item.job.id] = VideoProgress(message: "Uploading video", fraction: 0.37, sentBytes: 271_000_000, totalBytes: 734_003_200, bytesPerSecond: 6_400_000, updatedAt: Date())
-            }
+            DemoData.seedVideoDashboard(self)
         case "onboarding": showOnboarding = true
         default: sidebar = .dashboard
         }

@@ -538,5 +538,9 @@ final class VideoUploadTests: XCTestCase {
         XCTAssertNil(s.video.automaticSince)
         let clamped = try JSONDecoder().decode(VideoSettings.self, from: Data(#"{"maxConcurrentUploads":9}"#.utf8))
         XCTAssertEqual(clamped.maxConcurrentUploads, 3)
+        XCTAssertEqual(s.video.statsRefreshSeconds, 60)
+        XCTAssertEqual(s.video.byteUnit, .automatic)
+        XCTAssertTrue(s.video.separateTraffic)
+        XCTAssertEqual(s.video.lowSpacePercent, 10)
     }
 }

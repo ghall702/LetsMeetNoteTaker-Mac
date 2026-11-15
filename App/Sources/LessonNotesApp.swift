@@ -4,6 +4,7 @@ import LessonNotesCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if SelfTest.runIfRequested() { return }
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in AppModel.shared.start() }
     }

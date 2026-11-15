@@ -58,9 +58,12 @@ public struct VideoDependencies: Sendable {
     public var isOnline: @Sendable () -> Bool
     /// Folder for merged MP4s.
     public var videosDirectory: @Sendable () -> URL
+    /// Records the bytes actually sent (from upload progress) for the bandwidth figures.
+    public var transferLog: VideoTransferLog?
     public init(makeAPI: @escaping @Sendable () throws -> RecordingsAPI, media: VideoMediaProviding, uploader: SignedUploading,
-                isOnline: @escaping @Sendable () -> Bool, videosDirectory: @escaping @Sendable () -> URL) {
+                isOnline: @escaping @Sendable () -> Bool, videosDirectory: @escaping @Sendable () -> URL, transferLog: VideoTransferLog? = nil) {
         self.makeAPI = makeAPI; self.media = media; self.uploader = uploader; self.isOnline = isOnline; self.videosDirectory = videosDirectory
+        self.transferLog = transferLog
     }
 }
 
@@ -484,7 +487,10 @@ public actor VideoUploadEngine {
     func uploadStage(_ id: UUID, lesson: Lesson, job: Job, v: VideoUploadState, target: SignedUpload) async throws {
         guard let size = v.fileSize else { update(id) { $0.stage = .queued }; return }
         let handler = eventHandler
+        let meter = SentMeter(log: deps.transferLog)
+        defer { deps.transferLog?.save() }
         let progress: @Sendable (Int64, Int64) -> Void = { sent, total in
+            meter.observe(sent)
             handler?(.progress(jobId: id, message: "Uploading video", fraction: total > 0 ? Double(sent) / Double(total) : 0, sentBytes: sent, totalBytes: total))
         }
         progress(0, size)
@@ -591,8 +597,10 @@ public actor VideoUploadEngine {
                 update(id) { $0.recordingId = nil; $0.checkedExisting = false; $0.stage = .queued; $0.generation += 1
                              $0.uploadId = VideoUploadState.uploadId(for: id, generation: $0.generation) }
                 scheduleRetry(id, message: "The recording was removed on LetsMeet; registering a new upload.", kind: .server, retryAfter: 1)
-            case (404, _):
+            case (404, "note_not_found"):
                 finish(id, skipped: "This note no longer exists on LetsMeet.", kind: .noteDeleted)
+            case (404, _):
+                fail(id, "LetsMeet returned “not found” (\(e.code)). Check that the website's recordings feature is available, then Retry.", kind: .rejected, resume: nil)
             case (409, "upload_conflict"):
                 update(id) { $0.generation += 1; $0.uploadId = VideoUploadState.uploadId(for: id, generation: $0.generation); $0.stage = .registering }
                 scheduleRetry(id, message: "Upload id already used elsewhere; using a new one.", kind: .server, retryAfter: 1)
@@ -609,6 +617,10 @@ public actor VideoUploadEngine {
             switch e {
             case .tooLarge: fail(id, e.localizedDescription, kind: .rejected, resume: .queued)
             case .expired: update(id) { $0.stage = .registering }; scheduleRetry(id, message: "The upload link expired.", kind: .network, retryAfter: nil)
+            case .http(404), .http(502), .http(503), .http(504):
+                // Media server not answering on this route (e.g. gateway restarting): try again later.
+                update(id) { if $0.stage == .uploading { $0.stage = .registering } }
+                scheduleRetry(id, message: "The media server isn't accepting uploads right now.", kind: .server, retryAfter: nil)
             case .http(let c) where c < 500: fail(id, e.localizedDescription, kind: .rejected, resume: .registering)
             default:
                 // Interrupted: start the PUT again with a fresh link (same upload_id).
@@ -644,9 +656,12 @@ public actor VideoUploadEngine {
                     guard let target = replaceSigned[jobId] else { setReplacement(jobId) { $0.stage = .registering }; continue }
                     let handler = eventHandler
                     let size = r.fileSize
+                    let meter = SentMeter(log: deps.transferLog)
+                    defer { deps.transferLog?.save() }
                     do {
                         try await deps.media.withAccess(bookmark: r.bookmark, path: r.path) { [uploader = deps.uploader] url in
                             try await uploader.upload(file: url, size: size, to: target) { sent, total in
+                                meter.observe(sent)
                                 handler?(.progress(jobId: jobId, message: "Uploading replacement video", fraction: total > 0 ? Double(sent) / Double(total) : 0, sentBytes: sent, totalBytes: total))
                             }
                         }
@@ -715,5 +730,21 @@ public enum VideoActionError: Error, LocalizedError, Equatable {
         case .notUploaded: return "There is no uploaded video to replace."
         case .tooLarge: return "Videos must be 8 GiB or smaller."
         }
+    }
+}
+
+
+/// Turns cumulative upload progress into byte deltas for the transfer log.
+final class SentMeter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: Int64 = 0
+    let log: VideoTransferLog?
+    init(log: VideoTransferLog?) { self.log = log }
+    func observe(_ sent: Int64) {
+        lock.lock()
+        let delta = sent > last ? sent - last : 0
+        if sent > last { last = sent }
+        lock.unlock()
+        if delta > 0 { log?.add(delta) }
     }
 }

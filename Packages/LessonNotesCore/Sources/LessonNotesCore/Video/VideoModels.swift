@@ -272,11 +272,20 @@ public struct VideoSettings: Codable, Sendable, Equatable {
     public var mergedFolderPath: String?
     /// Lessons submitted from this time on are uploaded automatically; older ones need the backfill.
     public var automaticSince: Date?
+    /// Dashboard: seconds between server statistics refreshes while the Videos page is open.
+    public var statsRefreshSeconds = 60
+    /// Dashboard: units for sizes and traffic.
+    public var byteUnit: ByteUnit = .automatic
+    /// Dashboard: show uploads and playback separately (otherwise totals only).
+    public var separateTraffic = true
+    /// Dashboard: warn when less than this percentage of the storage volume is free.
+    public var lowSpacePercent = 10
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case autoUpload, maxConcurrentUploads, autoRetry, retryWindowHours, paused, deleteMergedAfterUpload, mergedFolderBookmark, mergedFolderPath, automaticSince
+        case autoUpload, maxConcurrentUploads, autoRetry, retryWindowHours, paused, deleteMergedAfterUpload, mergedFolderBookmark, mergedFolderPath, automaticSince,
+             statsRefreshSeconds, byteUnit, separateTraffic, lowSpacePercent
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -290,5 +299,9 @@ public struct VideoSettings: Codable, Sendable, Equatable {
         mergedFolderBookmark = try c.decodeIfPresent(Data.self, forKey: .mergedFolderBookmark)
         mergedFolderPath = try c.decodeIfPresent(String.self, forKey: .mergedFolderPath)
         automaticSince = try c.decodeIfPresent(Date.self, forKey: .automaticSince)
+        statsRefreshSeconds = min(600, max(30, try c.decodeIfPresent(Int.self, forKey: .statsRefreshSeconds) ?? d.statsRefreshSeconds))
+        byteUnit = (try? c.decodeIfPresent(ByteUnit.self, forKey: .byteUnit)) ?? d.byteUnit
+        separateTraffic = try c.decodeIfPresent(Bool.self, forKey: .separateTraffic) ?? d.separateTraffic
+        lowSpacePercent = min(50, max(1, try c.decodeIfPresent(Int.self, forKey: .lowSpacePercent) ?? d.lowSpacePercent))
     }
 }

@@ -19,6 +19,7 @@ struct VideosView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+                VideoDashboard()
                 if !model.activeVideoJobs.isEmpty { activeCard }
                 backfillCard
                 listCard
@@ -26,7 +27,11 @@ struct VideosView: View {
             .padding(20)
         }
         .navigationTitle("Videos")
-        .onAppear { if model.backfillReport == nil { model.scanBackfill() } }
+        .onAppear {
+            if model.backfillReport == nil { model.scanBackfill() }
+            model.startStatsPolling()
+        }
+        .onDisappear { model.stopStatsPolling() }
     }
 
     var header: some View {
@@ -55,7 +60,7 @@ struct VideosView: View {
     }
 
     var activeCard: some View {
-        Card(title: "Uploading", systemImage: "icloud.and.arrow.up") {
+        Card(title: "Upload queue", systemImage: "icloud.and.arrow.up") {
             ForEach(model.activeVideoJobs) { item in
                 VideoProgressRow(item: item)
                 Divider()
@@ -69,6 +74,29 @@ struct VideosView: View {
         Card(title: "Historical backfill", systemImage: "clock.arrow.2.circlepath") {
             Text("Lessons whose notes were uploaded before video uploads were turned on. Their notes are never resubmitted or changed — only the video is added to the existing note.")
                 .font(.callout).foregroundStyle(.secondary)
+            let bc = model.backfillCounts
+            let started = bc.completed + bc.alreadyOnLetsMeet + bc.failed + bc.skipped + bc.uploading + bc.awaiting
+            if started > 0 {
+                let finished = bc.completed + bc.alreadyOnLetsMeet + bc.failed + bc.skipped
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Backfill progress").font(.callout.weight(.semibold))
+                        if model.settings.video.paused && bc.uploading + bc.awaiting > 0 { StatusChip("Paused", color: .orange, icon: "pause.circle") }
+                        Spacer()
+                        Text("\(finished) of \(started) finished").font(.callout.monospacedDigit())
+                    }
+                    ProgressView(value: Double(finished), total: Double(max(1, started)))
+                    Text("\(bc.completed) uploaded · \(bc.alreadyOnLetsMeet) already on LetsMeet · \(bc.failed) failed · \(bc.skipped) skipped · \(bc.uploading + bc.awaiting) still to do")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let now = model.activeVideoJobs.first(where: { $0.job.video?.origin == .backfill && $0.job.video?.stage != .queued }) {
+                        Text("Now: \(now.lesson.pupilName), \(CoreFormat.longUKDate(now.lesson.lessonDate)) — \(now.job.video!.displayPhase(paused: model.settings.video.paused).rawValue)"
+                             + (model.videoProgress[now.job.id].map { " \(Int(($0.fraction * 100).rounded()))%" } ?? ""))
+                            .font(.caption)
+                    }
+                }
+                .padding(10)
+                .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            }
             if let r = model.backfillReport {
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {
                     GridRow {
@@ -128,7 +156,8 @@ struct VideosView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             let r = model.backfillReport
-            Text("\(r?.count(.eligible) ?? 0) lesson videos (about \((r?.estimatedBytes ?? 0).fileSize)) will be uploaded one after another to the existing notes. Make sure the media server has room for them. You can pause at any time; progress is kept if the app quits.")
+            let free = model.statsSnapshot.stats?.gateway.map { " The storage volume has \(ByteFormat.string($0.volume.availableBytes)) free." } ?? ""
+            Text("\(r?.count(.eligible) ?? 0) lesson videos (about \(ByteFormat.string(r?.estimatedBytes ?? 0))) will be uploaded to their existing notes, \(model.settings.video.maxConcurrentUploads) at a time.\(free) You can pause at any time; progress is kept if the app quits.")
         }
     }
 
@@ -193,56 +222,97 @@ struct VideoProgressRow: View {
     var body: some View {
         let v = item.job.video
         let p = model.videoProgress[item.job.id]
+        let phase = v?.displayPhase(paused: model.settings.video.paused)
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(item.lesson.pupilName).font(.callout.weight(.semibold))
-                Text(CoreFormat.longUKDate(item.lesson.lessonDate)).font(.caption).foregroundStyle(.secondary)
-                if (v?.sourceRecordingIds.count ?? 0) > 1 { Text("\(v!.sourceRecordingIds.count) recordings joined").font(.caption).foregroundStyle(.secondary) }
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.job.notes?.title ?? item.lesson.meetingTopic).font(.callout.weight(.semibold)).lineLimit(1)
+                    Text("\(item.lesson.pupilName) · \(item.lesson.roomName) · \(CoreFormat.longUKDate(item.lesson.lessonDate))")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
                 VideoStatusChip(video: v)
                 Button { model.stopVideo(item.job) } label: { Image(systemName: "xmark.circle") }.buttonStyle(.borderless).help("Stop")
             }
-            ProgressView(value: p?.fraction ?? 0)
-            HStack {
-                Text(p?.message ?? waitingText(v)).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let p, p.totalBytes > 0 {
-                    Text("\(Int((p.fraction * 100).rounded()))% · \(p.sentBytes.fileSize) of \(p.totalBytes.fileSize)"
-                         + (p.bytesPerSecond.map { " · \(Int64($0).fileSize)/s" } ?? ""))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                } else if let size = v?.fileSize {
-                    Text(size.fileSize).font(.caption).foregroundStyle(.secondary)
-                }
+            HStack(spacing: 6) {
+                Image(systemName: "film").foregroundStyle(.secondary)
+                Text(v?.originalFilename ?? "").font(.caption).lineLimit(1).truncationMode(.middle)
+                if let n = v?.sourceRecordingIds.count, n > 1 { Text("· \(n) recordings joined").font(.caption).foregroundStyle(.secondary) }
+                if let size = v?.fileSize { Text("· \(ByteFormat.string(size, unit: model.settings.video.byteUnit))").font(.caption).foregroundStyle(.secondary) }
+            }
+            if let p, let phase, [.uploading, .merging, .verifying, .readyToUpload, .preparing].contains(phase) {
+                ProgressView(value: min(1, max(0, p.fraction)))
+                Text(detail(p, phase: phase)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            } else {
+                ProgressView(value: 0).opacity(0.4)
+                Text(waitingText(v)).font(.caption).foregroundStyle(.secondary)
             }
         }
+        .padding(.vertical, 2)
+    }
+
+    func detail(_ p: VideoProgress, phase: VideoUploadState.DisplayPhase) -> String {
+        let unit = model.settings.video.byteUnit
+        if phase == .merging { return "Merging recordings — \(Int((p.fraction * 100).rounded()))%" }
+        guard p.totalBytes > 0, phase == .uploading else { return p.message }
+        var parts = ["\(Int((p.fraction * 100).rounded()))%", "\(ByteFormat.string(p.sentBytes, unit: unit)) / \(ByteFormat.string(p.totalBytes, unit: unit))"]
+        if let r = p.bytesPerSecond { parts.append("\(ByteFormat.string(Int64(r), unit: unit))/s") }
+        if let left = p.secondsRemaining { parts.append("about \(ByteFormat.duration(left)) remaining") }
+        return parts.joined(separator: " — ")
     }
 
     func waitingText(_ v: VideoUploadState?) -> String {
         guard let v else { return "" }
-        if let next = v.nextAttemptAt, next > Date() { return (v.lastError.map { $0 + " — " } ?? "") + "next try \(next.formatted(date: .omitted, time: .shortened))" }
         if model.settings.video.paused { return "Paused" }
-        return "Waiting"
+        if let next = v.nextAttemptAt, next > Date() { return (v.lastError.map { $0 + " — " } ?? "") + "next try \(next.formatted(date: .omitted, time: .shortened))" }
+        return v.displayPhase(paused: false).rawValue
     }
 }
 
 struct VideoStatusChip: View {
+    @EnvironmentObject var model: AppModel
     var video: VideoUploadState?
     var body: some View {
         if let v = video {
-            switch v.stage {
-            case .queued: StatusChip("Queued", color: .secondary, icon: "tray")
-            case .merging: StatusChip("Joining", color: .accentColor, icon: "film.stack")
-            case .registering, .uploading: StatusChip("Uploading", color: .accentColor, icon: "icloud.and.arrow.up")
-            case .completing: StatusChip("Confirming", color: .accentColor, icon: "checkmark.icloud")
-            case .ready:
-                if v.replacement != nil { StatusChip(v.replacement?.stage == .failed ? "Replace failed" : "Replacing", color: v.replacement?.stage == .failed ? .red : .accentColor, icon: "arrow.triangle.2.circlepath") }
-                else { StatusChip(v.adoptedExisting ? "Already on LetsMeet" : "Uploaded", color: .green, icon: "checkmark.seal.fill") }
-            case .failed: StatusChip("Needs attention", color: .red, icon: "exclamationmark.triangle.fill")
-            case .skipped: StatusChip("Skipped", color: .gray, icon: "minus.circle")
-            case .deleted: StatusChip(v.deletePending ? "Delete pending" : "Deleted", color: .gray, icon: "trash")
+            let phase = v.displayPhase(paused: model.settings.video.paused)
+            if v.stage == .ready, let r = v.replacement {
+                StatusChip(r.stage == .failed ? "Replace failed" : "Replacing", color: r.stage == .failed ? .red : .accentColor, icon: "arrow.triangle.2.circlepath")
+            } else if v.stage == .ready && v.adoptedExisting {
+                StatusChip("Already on LetsMeet", color: .green, icon: "checkmark.seal.fill")
+            } else if v.stage == .deleted && v.deletePending {
+                StatusChip("Delete pending", color: .gray, icon: "trash")
+            } else {
+                StatusChip(phase.rawValue, color: color(phase), icon: icon(phase))
             }
         } else {
             StatusChip("No video", color: .secondary, icon: "video.slash")
+        }
+    }
+
+    func color(_ p: VideoUploadState.DisplayPhase) -> Color {
+        switch p {
+        case .queued: return .secondary
+        case .preparing, .merging, .readyToUpload, .uploading, .verifying: return .accentColor
+        case .completed: return .green
+        case .failed: return .red
+        case .paused: return .orange
+        case .skipped, .deleted: return .gray
+        }
+    }
+
+    func icon(_ p: VideoUploadState.DisplayPhase) -> String {
+        switch p {
+        case .queued: return "tray"
+        case .preparing: return "gearshape"
+        case .merging: return "film.stack"
+        case .readyToUpload: return "arrow.up.circle"
+        case .uploading: return "icloud.and.arrow.up"
+        case .verifying: return "checkmark.icloud"
+        case .completed: return "checkmark.seal.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .paused: return "pause.circle"
+        case .skipped: return "minus.circle"
+        case .deleted: return "trash"
         }
     }
 }

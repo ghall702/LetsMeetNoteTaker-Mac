@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 75
     env:
-      DMG_NAME: LetsMeet-Lesson-Notes-1.9.0-build${{ github.run_number }}.dmg
+      DMG_NAME: LetsMeet-Lesson-Notes-1.10.0-build${{ github.run_number }}.dmg
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +27,9 @@ jobs:
           xcodebuild -version
           swift --version
           sw_vers
+
+      - name: Media gateway tests
+        run: node --test server/media-gateway/test/gateway.test.mjs
 
       - name: Core unit tests
         working-directory: Packages/LessonNotesCore
@@ -84,6 +87,18 @@ jobs:
             echo "App exited early"; cat launch.log; exit 1
           fi
 
+      - name: Video merge self-test (synthetic clips, real AVFoundation code)
+        run: |
+          APP="build/Build/Products/Release/Lesson Notes.app"
+          C="$HOME/Library/Containers/com.georgehalltuition.lessonnotes/Data/tmp/selftest"
+          mkdir -p "$C" && cp App/SelfTest/*.mp4 "$C/"
+          LESSONNOTES_SELFTEST=merge "$APP/Contents/MacOS/LessonNotes" > selftest.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 180); do kill -0 $PID 2>/dev/null || break; sleep 1; done
+          kill $PID 2>/dev/null || true
+          grep SELFTEST selftest.log || cat selftest.log
+          grep -q "SELFTEST PASS" selftest.log
+
       - name: Create DMG
         run: |
           scripts/make-dmg.sh "build/Build/Products/Release/Lesson Notes.app" "$DMG_NAME"
@@ -121,5 +136,5 @@ jobs:
               -e "s|__COMMIT__|${{ github.sha }}|g" -e "s|__RUN__|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|g" \
               docs/release-notes.md > release-notes.md
           gh release create "$TAG" "$DMG_NAME" "$DMG_NAME.sha256" --prerelease --target "${{ github.sha }}" \
-            --title "LetsMeet Lesson Notes 1.9.0 (build ${{ github.run_number }})" \
+            --title "LetsMeet Lesson Notes 1.10.0 (build ${{ github.run_number }})" \
             --notes-file release-notes.md

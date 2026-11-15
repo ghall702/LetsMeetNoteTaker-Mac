@@ -50,21 +50,24 @@ extension AppModel {
         switch e {
         case .progress(let id, let message, let fraction, let sent, let total):
             let now = Date()
-            var speed: Double?
-            if let old = videoProgress[id], old.message == message, sent > old.sentBytes {
-                let dt = now.timeIntervalSince(old.updatedAt)
-                if dt >= 0.5 {
-                    let instant = Double(sent - old.sentBytes) / dt
-                    speed = old.bytesPerSecond.map { $0 * 0.7 + instant * 0.3 } ?? instant
-                } else {
-                    return // throttle UI updates
-                }
+            var p = progressSamples[id] ?? VideoProgress(message: message, fraction: 0, sentBytes: 0, totalBytes: total, updatedAt: .distantPast)
+            if p.message != message { p.rate = TransferRate() }
+            p.rate.update(sent: sent, at: now)
+            p.message = message; p.fraction = fraction; p.sentBytes = sent; p.totalBytes = total
+            let published = videoProgress[id]
+            // Publish at most ~4 times a second per upload (URLSession reports very often).
+            if published == nil || published?.message != message || fraction >= 1 || now.timeIntervalSince(published!.updatedAt) >= 0.25 {
+                p.updatedAt = now
+                videoProgress[id] = p
             }
-            videoProgress[id] = VideoProgress(message: message, fraction: fraction, sentBytes: sent, totalBytes: total, bytesPerSecond: speed, updatedAt: now)
+            progressSamples[id] = p
         case .finished(let id):
             videoProgress[id] = nil
+            progressSamples[id] = nil
+            refreshStatsSoon()
         case .needsAttention(let id, _):
             videoProgress[id] = nil
+            progressSamples[id] = nil
         case .probeProgress(let done, let total):
             probeDone = done; probeTotal = total
             if done == total { scanBackfill() }
@@ -94,6 +97,7 @@ extension AppModel {
         Task {
             do {
                 let done = try await videoEngine.deleteRemote(jobId: job.id)
+                refreshStatsSoon()
                 banner = done ? "The video was deleted from LetsMeet. Your original recordings are untouched."
                               : "The video is hidden from pupils, but the media server didn't confirm the deletion yet. Use Retry Delete later."
             } catch { banner = "Deleting the video failed: \(error.localizedDescription)" }
@@ -117,7 +121,62 @@ extension AppModel {
 
     func cancelVideoReplacement(_ job: Job) { Task { await videoEngine.cancelReplacement(jobId: job.id) } }
 
-    private func recordingsAPI() throws -> LetsMeetClient {
+    // MARK: Dashboard
+
+    var videoCounts: VideoQueueCounts { VideoQueueCounts.count(allJobs.map(\.job)) }
+    var backfillCounts: VideoQueueCounts { VideoQueueCounts.count(allJobs.map(\.job), origin: .backfill) }
+
+    /// Combined speed of this Mac's uploads in progress (from real transferred bytes).
+    var currentUploadRate: Double? {
+        let rates = videoProgress.values.filter { $0.message.hasPrefix("Uploading") }.compactMap(\.bytesPerSecond)
+        return rates.isEmpty ? nil : rates.reduce(0, +)
+    }
+
+    /// Called when the Videos page appears; polls only while it is visible.
+    func startStatsPolling() {
+        statsViewers += 1
+        refreshStats()
+        scheduleStatsTimer()
+    }
+
+    func stopStatsPolling() {
+        statsViewers = max(0, statsViewers - 1)
+        if statsViewers == 0 { statsTimer?.invalidate(); statsTimer = nil }
+    }
+
+    func scheduleStatsTimer() {
+        statsTimer?.invalidate()
+        guard statsViewers > 0 else { return }
+        statsTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(settings.video.statsRefreshSeconds), repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshStats() }
+        }
+    }
+
+    func refreshStats() {
+        guard !isRefreshingStats, !isDemo else { return }
+        isRefreshingStats = true
+        Task {
+            do {
+                let api = try recordingsAPI()
+                statsSnapshot = await mediaStatsCache.refresh(using: api)
+            } catch {
+                var s = mediaStatsCache.snapshot
+                s.lastAttemptAt = Date()
+                s.lastError = error.localizedDescription
+                mediaStatsCache.store(s)
+                statsSnapshot = s
+            }
+            isRefreshingStats = false
+        }
+    }
+
+    /// After an upload or deletion, so storage totals update.
+    func refreshStatsSoon() {
+        guard statsViewers > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.refreshStats() }
+    }
+
+    func recordingsAPI() throws -> LetsMeetClient {
         guard let key = KeychainStore.get(.website), !key.isEmpty else { throw LetsMeetClientError.missingKey }
         return try LetsMeetClient(baseURLString: settings.websiteBaseURL, apiKey: key, transport: URLSessionTransport(timeout: 60))
     }

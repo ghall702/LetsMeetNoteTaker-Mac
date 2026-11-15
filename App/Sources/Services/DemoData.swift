@@ -157,7 +157,7 @@ enum DemoData {
             v.noteId = pair.1.noteId ?? "demo-note-\(i)"
             switch i {
             case 0: v.stage = .ready; v.recordingId = "demo-rec-0"; v.fileSize = 734_003_200; v.durationSec = 1700; v.completedAt = now
-            case 1: v.stage = .uploading; v.recordingId = "demo-rec-1"; v.fileSize = 734_003_200
+            case 1: v.stage = .uploading; v.recordingId = "demo-rec-1"; v.fileSize = 2_000_000_000
             default:
                 v.stage = .failed; v.errorKind = .recordingsMissing
                 v.lastError = "Original recording not found: zoom_0.mp4. Reconnect the drive or folder, then Retry."
@@ -175,5 +175,37 @@ enum DemoData {
         store.upsertDetection(PendingDetection(folderPath: folder, recordings: [
             ScannedRecording(path: folder + "/zoom_0.mp4", fileSize: 512_000_000, durationSeconds: 1810),
             ScannedRecording(path: folder + "/zoom_1.mp4", fileSize: 301_000_000, durationSeconds: 1190)]))
+    }
+
+    /// Screenshot sample for the Videos dashboard (LESSONNOTES_DEMO=videos only).
+    @MainActor static func seedVideoDashboard(_ model: AppModel) {
+        let now = Date()
+        let tz = TimeZone(identifier: "Europe/London")!
+        var days: [TrafficDay] = []
+        var server: [ServerTrafficDay] = []
+        for back in stride(from: 13, through: 0, by: -1) {
+            let d = Bandwidth.day(now.addingTimeInterval(-Double(back) * 86_400), tz)
+            let up = Int64([0, 3, 7, 12, 5, 0, 9, 14, 6, 11, 4, 8, 13, 2][13 - back]) * 1_000_000_000 / 2
+            let play = Int64([1, 2, 4, 3, 6, 2, 5, 7, 4, 8, 3, 6, 9, 3][13 - back]) * 1_000_000_000 / 3
+            days.append(TrafficDay(date: d, uploadBytes: up, playbackBytes: play))
+            server.append(ServerTrafficDay(date: d, rxBytes: up + 90_000_000, txBytes: play + 40_000_000))
+        }
+        let gateway = GatewayStats(timezone: "Europe/London",
+                                   volume: VolumeStats(path: "/srv/sftpgo/data/recordings", realPath: "/mnt/storage/sftpgo/data/recordings",
+                                                       totalBytes: 3_170_000_000_000, usedBytes: 476_000_000_000, availableBytes: 2_535_000_000_000),
+                                   recordings: GatewayRecordingIndex(count: 118, bytes: 451_000_000_000),
+                                   traffic: TrafficHistory(since: CoreFormat.iso8601(now.addingTimeInterval(-20 * 86_400)), days: days),
+                                   serverTraffic: ServerTrafficHistory(available: true, since: CoreFormat.iso8601(now.addingTimeInterval(-20 * 86_400)), days: server))
+        let snap = MediaStatsSnapshot(stats: MediaStatsResponse(gateway: gateway,
+                                                                recordings: WebsiteRecordingCounts(ready: 117, uploading: 1, failed: 0, deletePending: 0, readyBytes: 449_800_000_000)),
+                                      fetchedAt: now, lastAttemptAt: now)
+        model.mediaStatsCache.store(snap)
+        model.statsSnapshot = snap
+        for item in model.allJobs where item.job.video?.stage == .uploading {
+            var p = VideoProgress(message: "Uploading video", fraction: 0.62, sentBytes: 1_240_000_000, totalBytes: 2_000_000_000, updatedAt: now)
+            p.rate.update(sent: 1_231_500_000, at: now.addingTimeInterval(-1))
+            p.rate.update(sent: 1_240_000_000, at: now)
+            model.videoProgress[item.job.id] = p
+        }
     }
 }

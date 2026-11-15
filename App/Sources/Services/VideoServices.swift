@@ -19,6 +19,9 @@ enum VideoMergeError: LocalizedError {
 /// Recording access, AVFoundation merging and checks for video uploads. Original recordings are
 /// only ever read; merged files are written to the videos folder.
 struct AVVideoMedia: VideoMediaProviding {
+    /// The export preset the last successful merge used (for the CI self-test).
+    nonisolated(unsafe) static var lastPreset: String?
+
     func sourceInfo(_ rec: RecordingRef) async -> SourceFile {
         (try? await FolderAccess.withAccess(bookmark: rec.bookmark, path: rec.path) { url -> SourceFile in
             guard FileManager.default.isReadableFile(atPath: url.path),
@@ -100,6 +103,7 @@ struct AVVideoMedia: VideoMediaProviding {
                 let checked = try await Self.check(partial, expectedSeconds: expected, needVideo: anyVideo, needAudio: anyAudio)
                 try? FileManager.default.removeItem(at: output)
                 try FileManager.default.moveItem(at: partial, to: output)
+                Self.lastPreset = preset
                 return checked
             } catch is CancellationError {
                 try? FileManager.default.removeItem(at: partial)
@@ -224,12 +228,14 @@ final class URLSessionSignedUploader: NSObject, SignedUploading, @unchecked Send
     }
 }
 
-/// Upload progress shown in the app (speed from recent bytes).
+/// Upload progress shown in the app, from the real bytes URLSession reports as sent.
 struct VideoProgress: Equatable {
     var message: String
     var fraction: Double
     var sentBytes: Int64
     var totalBytes: Int64
-    var bytesPerSecond: Double?
+    var rate = TransferRate()
     var updatedAt: Date
+    var bytesPerSecond: Double? { rate.bytesPerSecond }
+    var secondsRemaining: Double? { rate.secondsRemaining(sent: sentBytes, total: totalBytes) }
 }

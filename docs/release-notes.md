@@ -9,7 +9,13 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.9
+### What's in 1.10
+- **Video dashboard** on the Videos page: storage on the media server's 3 TB volume (doughnut chart: lesson recordings, other files, available), stored video count and total size, ready/unconfirmed counts from LetsMeet, and this Mac's queue (uploading, awaiting, failed).
+- **Bandwidth:** today, this week (Mon–Sun) and this month, uploads and playback separately, with a 14-day chart, plus whole-server traffic — once the media server statistics are available. Until then the page shows this Mac's own upload traffic, clearly labelled.
+- **Per-lesson upload progress:** lesson, pupil, file, size, status (Queued → Preparing → Merging → Ready to upload → Uploading → Verifying → Completed), percentage, bytes sent, real speed and time remaining, from the bytes actually sent. Backfill shows overall progress and which lesson is in progress.
+- Statistics refresh every minute while the page is open (Settings → Videos → Dashboard), after uploads and deletions, and on demand; if the server can't be reached the last figures stay, marked as stale.
+
+### Also in 1.9
 - **Lesson videos on LetsMeet:** after a lesson's notes are uploaded, its recording is uploaded and attached to the same note (Settings → Videos; on by default for new lessons). Uploads go straight to your media server through LetsMeet's signed, expiring links and stream from disk.
 - **Combined lessons become one video:** recordings that were combined into one set of notes are joined into one continuous MP4 in their saved order (lossless when the parts match, re-encoded only when they don't), checked, then uploaded. Separate lessons upload each part to its own note.
 - **Historical backfill** (Videos page): finds lessons uploaded before this version, checks their original recordings, can look up which notes already have a video, and uploads the rest when you press **Start Backfill**. Pause, resume and retry at any time; progress survives quitting. Existing notes are never resubmitted or changed.

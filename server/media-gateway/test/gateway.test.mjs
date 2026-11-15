@@ -16,7 +16,7 @@ function token(claims) {
 }
 
 async function start(dataDir, port) {
-  const child = spawn(process.execPath, [path.resolve("gateway.mjs")], {
+  const child = spawn(process.execPath, [new URL("../gateway.mjs", import.meta.url).pathname], {
     env: { ...process.env, MEDIA_GATEWAY_SECRET: SECRET, DATA_DIR: dataDir, PORT: String(port), STATS_TZ: "Europe/London" },
     stdio: ["ignore", "pipe", "pipe"],
   });
