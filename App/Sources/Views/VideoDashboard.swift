@@ -10,11 +10,17 @@ struct VideoDashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             serverStatusBar
-            HStack(alignment: .top, spacing: 16) {
-                StorageCard().frame(maxWidth: .infinity)
-                VideoCountsCard().frame(maxWidth: .infinity)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    StorageCard().frame(minWidth: 470, maxWidth: .infinity)
+                    VideoCountsCard().frame(minWidth: 420, maxWidth: .infinity)
+                }
+                VStack(spacing: 16) {
+                    StorageCard()
+                    VideoCountsCard()
+                }
             }
-            BandwidthCard()
+            BandwidthCard().id("bandwidth")
         }
     }
 
@@ -72,7 +78,7 @@ struct StorageCard: View {
                             .foregroundStyle(s.color)
                     }
                     .chartLegend(.hidden)
-                    .frame(width: 170, height: 170)
+                    .frame(width: 150, height: 150)
                     .overlay {
                         VStack(spacing: 0) {
                             Text(ByteFormat.percent(b.usedFraction)).font(.title2.weight(.bold).monospacedDigit())
@@ -84,10 +90,10 @@ struct StorageCard: View {
                         ForEach(slices(b)) { s in
                             HStack(spacing: 6) {
                                 Circle().fill(s.color).frame(width: 9, height: 9)
-                                Text(s.name).font(.callout)
+                                Text(s.name).font(.callout).lineLimit(1).fixedSize()
                                 Spacer(minLength: 8)
-                                Text(ByteFormat.string(s.bytes, unit: unit)).font(.callout.monospacedDigit())
-                                Text(ByteFormat.percent(b.fraction(s.bytes))).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 44, alignment: .trailing)
+                                Text(ByteFormat.string(s.bytes, unit: unit)).font(.callout.monospacedDigit()).lineLimit(1).fixedSize()
+                                Text(ByteFormat.percent(b.fraction(s.bytes))).font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1).frame(width: 44, alignment: .trailing)
                             }
                         }
                         if b.recordings == nil {
@@ -123,7 +129,7 @@ struct StorageCard: View {
         if let r = b.recordings { out.append(StorageSlice(name: "Lesson recordings", bytes: r, color: .accentColor)) }
         if let o = b.otherUsed { out.append(StorageSlice(name: "Other files", bytes: o, color: .orange)) }
         else { out.append(StorageSlice(name: "Used", bytes: b.used, color: .orange)) }
-        if b.reserved > 0 { out.append(StorageSlice(name: "Reserved by the file system", bytes: b.reserved, color: .gray)) }
+        if b.reserved > 0 { out.append(StorageSlice(name: "File system reserve", bytes: b.reserved, color: .gray)) }
         out.append(StorageSlice(name: "Available", bytes: b.available, color: .green.opacity(0.45)))
         return out
     }

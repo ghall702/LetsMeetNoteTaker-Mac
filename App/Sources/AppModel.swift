@@ -301,7 +301,7 @@ final class AppModel: ObservableObject {
         case "students": sidebar = .students; demoSelectFirstStudent = true
         case "settings": sidebar = .settings; settingsTab = 1
         case "usage": sidebar = .usage
-        case "videos": sidebar = .videos
+        case "videos", "videosbw": sidebar = .videos
             backfillReport = VideoBackfill.scan(store: store) { $0.fileSize > 0 ? $0.fileSize : nil }
             DemoData.seedVideoDashboard(self)
         case "onboarding": showOnboarding = true

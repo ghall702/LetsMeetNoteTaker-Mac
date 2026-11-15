@@ -16,6 +16,7 @@ struct VideosView: View {
     enum Filter: String, CaseIterable, Identifiable { case all = "All", active = "Active", failed = "Needs attention", done = "Uploaded"; var id: String { rawValue } }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
@@ -25,6 +26,11 @@ struct VideosView: View {
                 listCard
             }
             .padding(20)
+        }
+        .onAppear {
+            // Screenshot mode: show the bandwidth card.
+            if DemoData.mode == "videosbw" { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { proxy.scrollTo("bandwidth", anchor: .top) } }
+        }
         }
         .navigationTitle("Videos")
         .onAppear {
