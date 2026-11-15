@@ -5,11 +5,16 @@
 ### Install or update
 1. Quit Lesson Notes if it is running (menu bar icon → **Quit Lesson Notes**).
 2. Open the DMG and drag **LetsMeet Lesson Notes** onto **Applications**. Your settings, keys, students, prompts, queue and history are kept.
-   **Updating from 1.5 or earlier:** the app has been renamed, so the old copy is not replaced automatically — after copying the new one, drag the old **Let's Meet Lesson Notes** from Applications to the Bin. Only ever run one copy.
+   **Updating from 1.5 or earlier only:** the app has been renamed, so the old copy is not replaced automatically — after copying the new one, drag the old **Let's Meet Lesson Notes** from Applications to the Bin. Only ever run one copy.
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.6
+### What's in 1.7
+- **Swap files before upload:** files can be added, removed or swapped until the note is uploaded — also after the notes are written, whenever the lesson isn't running (held, needs attention or cancelled). A prepared upload is discarded and a new submission ID used, so the website never sees conflicting files.
+- **Regenerate with different context:** the Regenerate Notes sheet lists the lesson's files — tick or untick each one for AI context, change what it is, or add a **context-only** file (used by OpenAI, not uploaded). History flags notes whose files or AI settings have changed since they were written, with a Regenerate button.
+- **Redo with Different Files** (uploaded notes): LetsMeet can't change the files of an uploaded note, so this makes a new lesson from the saved transcript (no re-transcription) with copies of the files. It waits for you to swap files and press Start, then uploads as a new note — delete or reject the old note in Admin Tools.
+
+### Also in 1.6
 - **Lesson files:** attach up to 5 files to a lesson (PDF, Word, PowerPoint, Excel, text, CSV or images; up to 20 MB each) in the Confirm sheet or in History until the notes are written. They are uploaded with the note and pupils can download them once you approve it.
 - **Files as AI context:** for each file choose **Slides**, **Student work**, **My work (exemplar)** or **Other material**, and switch **Include in AI context** on or off. Included files go to OpenAI with the transcript, labelled with what they are. PDFs are sent as PDFs (OpenAI sees the text and the pages, including diagrams and handwriting), images as images, and Word/PowerPoint/Excel/text as their text. Excluded files are uploaded for the pupil only.
 - Files are copied into the app when added, so uploads and retries always send exactly the same files. Audio and video are never accepted.

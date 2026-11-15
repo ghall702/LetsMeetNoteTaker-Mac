@@ -605,6 +605,7 @@ public actor JobEngine {
             $0.attempts = 0
             $0.firstRetryAt = nil
             $0.completedStagesAt["summarised"] = now()
+            $0.filesChangedSinceNotes = nil
         }
     }
 
@@ -625,7 +626,7 @@ public actor JobEngine {
             }
             let issues = SubmissionValidator.validate(submission)
             if !issues.isEmpty { throw PipelineError.invalidSubmission(issues.map(\.description).joined(separator: "; ")) }
-            let files = job.attachments ?? []
+            let files = job.uploadAttachments
             if let problem = AttachmentRules.check(files, noteJSONBytes: body.count) {
                 throw PipelineError.invalidSubmission(problem.localizedDescription)
             }

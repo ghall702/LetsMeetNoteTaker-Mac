@@ -408,7 +408,7 @@ struct JobSection: View {
                 }
             }
 
-            JobAttachmentsSection(job: job)
+            JobAttachmentsSection(job: job, onRegenerate: job.hasTranscript ? { regenerate = RegenerateRequest(draftId: nil) } : nil)
 
             if job.hasTranscript, let loaded = transcriptText, loaded.jobId == job.id {
                 let text = loaded.text
@@ -441,6 +441,10 @@ struct JobSection: View {
             }.value
         }
         .onAppear {
+            if model.demoRegenerateOptions {
+                model.demoRegenerateOptions = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { regenerate = RegenerateRequest(draftId: nil) }
+            }
             if model.demoReviewDraft, let d = job.draftVersions.last {
                 model.demoReviewDraft = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { regenerate = RegenerateRequest(draftId: d.id) }

@@ -121,9 +121,9 @@ final class AttachmentTests: XCTestCase {
         try h.store.removeAttachment(jobId: jid, id: a.id)
         XCTAssertEqual(h.store.job(id: jid)?.attachments?.count, 4)
         XCTAssertFalse(FileManager.default.fileExists(atPath: h.store.attachmentURL(jobId: jid, a).path))
-        // Role can change any time; files are locked once notes exist.
+        // Role can change any time; uploadable files are locked once the note is uploaded.
         let first = h.store.job(id: jid)!.attachments![0]
-        h.store.updateJob(id: jid) { $0.notes = GeneratedNotes(title: "T") }
+        h.store.updateJob(id: jid) { $0.notes = GeneratedNotes(title: "T"); $0.stage = .submitted }
         h.store.setAttachmentRole(jobId: jid, id: first.id, role: .slides)
         XCTAssertEqual(h.store.job(id: jid)?.attachments?.first?.role, .slides)
         XCTAssertThrowsError(try h.store.addAttachment(from: src, toJob: jid)) { XCTAssertEqual($0 as? LibraryStore.AttachmentError, .notEditable) }

@@ -172,10 +172,22 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     /// The files frozen with the upload payload (sent identically on every retry).
     public var submittedAttachments: [LessonAttachment]?
 
-    /// Files can be added or removed until notes are written and the upload is prepared.
+    /// Files written into the notes no longer match the files/AI settings (regenerate to use them).
+    public var filesChangedSinceNotes: Bool?
+
+    /// Uploadable files can be swapped until the note is uploaded: freely before notes are
+    /// written, and afterwards whenever the job is not running (held, failed or cancelled).
+    /// Changing them discards a prepared upload and uses a new submission id.
     public var attachmentsEditable: Bool {
-        notes == nil && submissionPayload == nil && ![.submitted, .submitting, .cancelled].contains(stage)
+        switch stage {
+        case .submitted, .submitting: return false
+        case .held, .failed, .cancelled: return true
+        default: return notes == nil && submissionPayload == nil
+        }
     }
+
+    /// Files that go to the website with the note.
+    public var uploadAttachments: [LessonAttachment] { (attachments ?? []).filter { !$0.contextOnly } }
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

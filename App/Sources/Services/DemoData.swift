@@ -96,6 +96,23 @@ enum DemoData {
                 NoteVersion(createdAt: now, kind: .regenerated, state: .draft, notes: draftNotes, model: "gpt-5-mini", effort: .high, promptSource: .global,
                             additionalInstructions: "Add a section on simplifying.", baseVersion: 2)]
             store.addLesson(l)
+            // Sample lesson files: two uploaded with the note, one added later as context only.
+            var files: [LessonAttachment] = []
+            for (name, role, include, ctxOnly) in [("Fractions slides.pdf", AttachmentRole.slides, true, false),
+                                                   ("Ellie's worksheet.jpg", AttachmentRole.studentWork, true, false),
+                                                   ("Model answers.docx", AttachmentRole.exemplar, false, true)] {
+                let a = LessonAttachment(filename: name, byteCount: 180_000 + name.count * 1000, sha256: "demo", role: role,
+                                         includeInContext: include, contextOnly: ctxOnly, addedAt: now)
+                let u = store.attachmentURL(jobId: l.jobs[0].id, a)
+                try? FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? Data("demo".utf8).write(to: u)
+                files.append(a)
+            }
+            store.updateJob(id: l.jobs[0].id) {
+                $0.attachments = files
+                $0.submittedAttachments = files.filter { !$0.contextOnly }
+                $0.filesChangedSinceNotes = true
+            }
             try? store.saveTranscript(StoredTranscript(jobId: l.jobs[0].id, savedAt: now, model: "whisperkit/openai_whisper-large-v3-v20240930_turbo", language: "en",
                 parts: [TranscriptPart(recordingId: l.recordings[0].id, filename: "zoom_0.mp4", recordedAt: l.recordings[0].recordedAt, durationSec: 1700, segments: [
                     TranscriptSegment(start: 0, end: 6, text: "Right, let's look at adding fractions today."),

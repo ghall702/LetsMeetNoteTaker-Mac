@@ -84,6 +84,16 @@ struct RegenerateSheet: View {
                         Text("Not saved. Your global and student prompts stay as they are.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if let job {
+                    Section {
+                        JobAttachmentsSection(job: job, showsHeader: false)
+                    } header: {
+                        Text("Lesson files used as context")
+                    } footer: {
+                        Text("Tick or untick files, change what they are, or add a context-only file. These choices are saved and used for this regeneration.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Additional instructions (optional, this version only)") {
                     TextEditor(text: $extra)
                         .frame(minHeight: 70)

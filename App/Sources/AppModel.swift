@@ -98,6 +98,7 @@ final class AppModel: ObservableObject {
     @Published var banner: String?
     /// Screenshot mode only: open the draft review sheet automatically.
     @Published var demoReviewDraft = false
+    @Published var demoRegenerateOptions = false
     @Published var demoSelectFirstStudent = false
     @Published var settingsTab = 0
 
@@ -264,7 +265,7 @@ final class AppModel: ObservableObject {
         Task { await engine.setPaused(true) }
         progress = Dictionary(uniqueKeysWithValues: activeJobs.map { ($0.job.id, JobProgress(fraction: 0.42, message: "Transcribing (part 1 of 2)")) })
         switch demo {
-        case "history", "regenerate": sidebar = .history; demoReviewDraft = demo == "regenerate"; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
+        case "history", "regenerate", "regenfiles": sidebar = .history; demoReviewDraft = demo == "regenerate"; demoRegenerateOptions = demo == "regenfiles"; selectedLessonId = lessons.first { $0.jobs.first?.remoteStatus == .published }?.id
         case "students": sidebar = .students; demoSelectFirstStudent = true
         case "settings": sidebar = .settings; settingsTab = 1
         case "usage": sidebar = .usage
@@ -572,18 +573,34 @@ final class AppModel: ObservableObject {
         }.value
     }
 
-    func addFiles(_ urls: [URL], to job: Job) {
+    func addFiles(_ urls: [URL], to job: Job, contextOnly: Bool = false) {
         guard !urls.isEmpty else { return }
         let store = self.store
         Task {
             let failures = await Task.detached(priority: .userInitiated) { () -> [String] in
                 var out: [String] = []
                 for u in urls {
-                    do { try store.addAttachment(from: u, toJob: job.id) } catch { out.append(error.localizedDescription) }
+                    do { try store.addAttachment(from: u, toJob: job.id, contextOnly: contextOnly) } catch { out.append(error.localizedDescription) }
                 }
                 return out
             }.value
             if !failures.isEmpty { banner = failures.joined(separator: " ") }
+        }
+    }
+
+    /// New held lesson from the saved transcript with copies of the files (see RedoFromTranscript).
+    func redoWithDifferentFiles(_ job: Job) {
+        let store = self.store
+        Task {
+            do {
+                let l = try await Task.detached(priority: .userInitiated) { try RedoFromTranscript.make(store: store, jobId: job.id) }.value
+                reload()
+                sidebar = .history
+                selectedLessonId = l.id
+                banner = "New lesson created from the saved transcript. Change its files, then press Start. Remember to delete or reject the old note in Admin Tools once the new one is approved."
+            } catch {
+                banner = error.localizedDescription
+            }
         }
     }
 

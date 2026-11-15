@@ -44,12 +44,16 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
     public var role: AttachmentRole
     /// When false the file is only uploaded for the pupil; OpenAI never sees it.
     public var includeInContext: Bool
+    /// Used only as OpenAI context, never uploaded (e.g. added after the note was uploaded,
+    /// because the website cannot add files to an existing note).
+    public var contextOnly: Bool
     public var addedAt: Date
 
     public init(id: UUID = UUID(), filename: String, byteCount: Int, sha256: String, role: AttachmentRole = .other,
-                includeInContext: Bool = true, addedAt: Date = Date()) {
+                includeInContext: Bool = true, contextOnly: Bool = false, addedAt: Date = Date()) {
         self.id = id
         self.includeInContext = includeInContext
+        self.contextOnly = contextOnly
         self.filename = filename
         self.byteCount = byteCount
         self.sha256 = sha256
@@ -57,7 +61,7 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
         self.addedAt = addedAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, filename, byteCount, sha256, role, includeInContext, addedAt }
+    enum CodingKeys: String, CodingKey { case id, filename, byteCount, sha256, role, includeInContext, contextOnly, addedAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -66,6 +70,7 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
         sha256 = try c.decode(String.self, forKey: .sha256)
         role = (try? c.decodeIfPresent(AttachmentRole.self, forKey: .role)) ?? .other
         includeInContext = try c.decodeIfPresent(Bool.self, forKey: .includeInContext) ?? true
+        contextOnly = try c.decodeIfPresent(Bool.self, forKey: .contextOnly) ?? false
         addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date(timeIntervalSince1970: 0)
     }
 

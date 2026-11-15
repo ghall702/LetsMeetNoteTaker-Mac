@@ -38,9 +38,11 @@ struct AttachmentRowView: View {
     @Binding var includeInContext: Bool
     var onOpen: (() -> Void)?
     var onRemove: (() -> Void)?
+    var contextOnly: Bool
 
     init(filename: String, byteCount: Int, role: Binding<AttachmentRole>, includeInContext: Binding<Bool>,
-         onOpen: (() -> Void)? = nil, onRemove: (() -> Void)? = nil) {
+         contextOnly: Bool = false, onOpen: (() -> Void)? = nil, onRemove: (() -> Void)? = nil) {
+        self.contextOnly = contextOnly
         self.filename = filename
         self.byteCount = byteCount
         self._role = role
@@ -60,6 +62,11 @@ struct AttachmentRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(-1)
                     .help(filename)
+                if contextOnly {
+                    Text("Context only").font(.caption2.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.15), in: Capsule()).foregroundStyle(.purple).fixedSize()
+                        .help("Used as OpenAI context only; not uploaded to LetsMeet")
+                }
                 Text(Int64(byteCount).formatted(.byteCount(style: .file))).font(.caption).foregroundStyle(.secondary).fixedSize()
                 if let onOpen { Button("Open") { onOpen() }.buttonStyle(.link).fixedSize() }
                 if let onRemove {
@@ -86,23 +93,52 @@ struct AttachmentRowView: View {
     }
 }
 
-/// Lesson files for one job in History: add/remove until notes are written; type and
-/// AI-context switch can be changed at any time.
+/// Lesson files for one job (History and the Regenerate sheet).
+/// - Before upload: files can be swapped (while the lesson isn't running).
+/// - After upload: the website can't change a note's files, so extra files are "context only",
+///   and "Redo with Different Files" makes a new note from the saved transcript.
 struct JobAttachmentsSection: View {
     @EnvironmentObject var model: AppModel
     var job: Job
-    init(job: Job) { self.job = job }
+    var showsHeader: Bool
+    var onRegenerate: (() -> Void)?
+    @State private var confirmRedo = false
 
-    var files: [LessonAttachment] { job.submittedAttachments ?? job.attachments ?? [] }
+    init(job: Job, showsHeader: Bool = true, onRegenerate: (() -> Void)? = nil) {
+        self.job = job
+        self.showsHeader = showsHeader
+        self.onRegenerate = onRegenerate
+    }
+
+    var files: [LessonAttachment] { job.attachments ?? job.submittedAttachments ?? [] }
+    var uploaded: Bool { job.stage == .submitted }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("Lesson files", systemImage: "paperclip").font(.headline)
+                if showsHeader { Label("Lesson files", systemImage: "paperclip").font(.headline) }
                 Spacer()
-                if job.attachmentsEditable && files.count < AttachmentRules.maxFiles {
+                if job.attachmentsEditable {
                     Button("Add Files…") { model.addFiles(AttachmentPicker.choose(), to: job) }
+                        .disabled(job.uploadAttachments.count >= AttachmentRules.maxFiles)
+                } else if job.hasTranscript {
+                    Button("Add Context-Only File…") { model.addFiles(AttachmentPicker.choose(), to: job, contextOnly: true) }
+                        .help("Used by OpenAI when you regenerate; not uploaded (the website can't add files to an uploaded note)")
                 }
+                if uploaded && job.hasTranscript {
+                    Button("Redo with Different Files…") { confirmRedo = true }
+                        .help("Make a new note from the saved transcript with a different set of files")
+                }
+            }
+            if job.filesChangedSinceNotes == true, job.notes != nil {
+                HStack {
+                    Label("The files or their AI settings have changed since these notes were written.", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.callout)
+                    Spacer()
+                    if let onRegenerate { Button("Regenerate Notes…") { onRegenerate() }.buttonStyle(.borderedProminent) }
+                }
+                .padding(8)
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
             }
             if files.isEmpty {
                 Text(job.attachmentsEditable ? "Optional: slides, the pupil's work or your model answers. They help OpenAI write the notes and the pupil can download them once you approve."
@@ -113,19 +149,31 @@ struct JobAttachmentsSection: View {
                 AttachmentRowView(filename: a.filename, byteCount: a.byteCount,
                                   role: Binding(get: { a.role }, set: { model.setAttachmentRole(job: job, id: a.id, role: $0) }),
                                   includeInContext: Binding(get: { a.includeInContext }, set: { model.setAttachmentIncluded(job: job, id: a.id, included: $0) }),
+                                  contextOnly: a.contextOnly,
                                   onOpen: { NSWorkspace.shared.open(model.store.attachmentURL(jobId: job.id, a)) },
-                                  onRemove: job.attachmentsEditable ? { model.removeAttachment(job: job, id: a.id) } : nil)
+                                  onRemove: (job.attachmentsEditable || a.contextOnly) ? { model.removeAttachment(job: job, id: a.id) } : nil)
                 Divider()
             }
-            if !files.isEmpty {
+            if !files.isEmpty || uploaded {
                 Text(caption).font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .alert("Redo with different files?", isPresented: $confirmRedo) {
+            Button("Make New Note") { model.redoWithDifferentFiles(job) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A new lesson is created from the saved transcript (no re-transcription) with a copy of these files. It waits in History so you can swap files, then press Start. It is uploaded as a NEW note, because LetsMeet can't change the files of an uploaded note — afterwards, delete or reject the old note in Admin Tools.")
         }
     }
 
     var caption: String {
-        if job.stage == .submitted { return "Uploaded with the note. The pupil can download them once you approve it. Changing a file's type or AI switch only affects future regenerations." }
-        if !job.attachmentsEditable { return "Files are fixed now the notes have been written. Type and AI switch still apply when you regenerate." }
-        return "Files can be added or removed until the notes are written."
+        if uploaded {
+            return "Uploaded files can't be changed on LetsMeet. You can change any file's type or AI switch, or add context-only files, and then Regenerate Notes (the website note is updated, its files stay the same). To change the files pupils download, use Redo with Different Files."
+        }
+        if job.attachmentsEditable && job.notes != nil {
+            return "Notes were already written. Changing files here means a fresh upload (new submission ID); regenerate to use the new files."
+        }
+        if !job.attachmentsEditable { return "Files can be swapped while this lesson isn't running (e.g. when it is held or needs attention)." }
+        return "Files can be added or removed until the note is uploaded."
     }
 }
