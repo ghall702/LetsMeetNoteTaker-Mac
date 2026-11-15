@@ -140,7 +140,7 @@ extension AppModel {
                 let api = try recordingsAPI()
                 let a = try await api.availability(recordingId: rid)
                 let rec = try? await api.recording(id: rid)
-                store.updateJob(id: job.id) { $0.video?.remoteStatus = rec?.status ?? a.status ?? $0.video?.remoteStatus }
+                if let status = rec?.status ?? a.status { store.updateJob(id: job.id) { $0.video?.remoteStatus = status } }
                 banner = a.available ? "The video is available on LetsMeet." : "The video is not available: \(a.reason ?? a.status ?? "unknown reason")."
             } catch { banner = "Checking the video failed: \(error.localizedDescription)" }
         }
