@@ -1,7 +1,7 @@
 // Verifies the gateway's /stats endpoint on the server itself, using the existing secret file.
 // Usage (as root):  node check-stats.mjs [/opt/media-gateway/.env] [http://127.0.0.1:8787]
 // Prints a summary only — never the secret or the token.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createHmac } from "node:crypto";
 
 const envFile = process.argv[2] || "/opt/media-gateway/.env";
@@ -27,8 +27,13 @@ console.log(`Recordings: ${s.recordings.count ?? "(still counting)"} files, ${s.
 const today = s.traffic.days.at(-1);
 console.log(`Traffic today (${s.timezone}): ${today ? `uploads ${gb(today.upload_bytes)}, playback ${gb(today.playback_bytes)}` : "none yet"}`);
 console.log(`Whole-server traffic: ${s.server_traffic.available ? "available" : "not yet sampled (wait a minute)"}`);
-if (!String(s.volume.real_path).startsWith("/mnt/storage")) {
-  console.log("WARNING: the recordings folder is not on /mnt/storage — check DATA_DIR.");
-  process.exit(2);
+// Is the recordings folder on the same device as /mnt/storage (works for symlinks and bind mounts)?
+const storage = process.env.STORAGE_MOUNT || "/mnt/storage";
+try {
+  const same = statSync(s.volume.path).dev === statSync(storage).dev;
+  console.log(same ? `Recordings folder is on ${storage}.` : `WARNING: the recordings folder is not on ${storage} — check DATA_DIR.`);
+  if (!same) process.exit(2);
+} catch (e) {
+  console.log(`(Couldn't compare with ${storage}: ${e.code || e.message}; the volume size above shows which drive it is.)`);
 }
 console.log("OK");
