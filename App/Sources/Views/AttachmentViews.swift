@@ -50,35 +50,38 @@ struct AttachmentRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        // Every line is allowed to shrink to the available width (long file names are
+        // truncated in the middle), so the row never pushes the sheet wider than it is.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 Image(systemName: role.systemImage).foregroundStyle(.tint).frame(width: 18)
-                Text(filename).lineLimit(1).truncationMode(.middle)
-                Text(Int64(byteCount).formatted(.byteCount(style: .file))).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let onOpen { Button("Open") { onOpen() }.buttonStyle(.link) }
+                Text(filename)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(-1)
+                    .help(filename)
+                Text(Int64(byteCount).formatted(.byteCount(style: .file))).font(.caption).foregroundStyle(.secondary).fixedSize()
+                if let onOpen { Button("Open") { onOpen() }.buttonStyle(.link).fixedSize() }
                 if let onRemove {
                     Button(role: .destructive) { onRemove() } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless).help("Remove this file").accessibilityLabel("Remove \(filename)")
                 }
             }
-            HStack(spacing: 12) {
-                Picker("This file is", selection: $role) {
-                    ForEach(AttachmentRole.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(!includeInContext)
-                .help("Tells OpenAI what this file is")
-                Toggle("Include in AI context", isOn: $includeInContext)
-                    .toggleStyle(.switch).controlSize(.small)
-                    .help("Off: the file is only uploaded for the pupil; OpenAI never sees it")
-                    .fixedSize()
+            Picker("This file is", selection: $role) {
+                ForEach(AttachmentRole.allCases) { Text($0.label).tag($0) }
             }
-            if !includeInContext {
-                Text("Not sent to OpenAI — uploaded for the pupil only.").font(.caption).foregroundStyle(.secondary)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 480, alignment: .leading)
+            .disabled(!includeInContext)
+            .help("Tells OpenAI what this file is")
+            Toggle(isOn: $includeInContext) {
+                Text(includeInContext ? "Include in AI context" : "Include in AI context — off: uploaded for the pupil only, not sent to OpenAI")
             }
+            .toggleStyle(.checkbox)
+            .help("Off: the file is only uploaded for the pupil; OpenAI never sees it")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
 }

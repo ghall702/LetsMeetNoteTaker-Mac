@@ -277,7 +277,7 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self else { return }
             self.showMainWindow()
-            if demo == "review", let d = self.detections.first { self.openDetection(folderPath: d.folderPath) }
+            if demo == "review" || demo == "files", let d = self.detections.first { self.openDetection(folderPath: d.folderPath) }
         }
         // Screenshot helper: size the main window and publish its frame so CI can crop to it.
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in

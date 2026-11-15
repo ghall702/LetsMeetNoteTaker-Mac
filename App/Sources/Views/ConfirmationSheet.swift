@@ -74,6 +74,7 @@ struct ConfirmationSheet: View {
             }
             .padding([.horizontal, .top], 20)
 
+            ScrollViewReader { proxy in
             Form {
                 Section("Student") {
                     Picker("Pupil", selection: $studentId) {
@@ -125,6 +126,7 @@ struct ConfirmationSheet: View {
                             .disabled(files.count >= AttachmentRules.maxFiles)
                         if let fileError { Text(fileError).font(.caption).foregroundStyle(.red) }
                     }
+                    Color.clear.frame(height: 1).id("lesson-files")
                 } header: {
                     Text("Lesson files (optional)")
                 } footer: {
@@ -144,6 +146,11 @@ struct ConfirmationSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .onChange(of: files.count) { _, _ in
+                // Screenshot mode: show the files section.
+                if DemoData.mode == "files" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { withAnimation { proxy.scrollTo("lesson-files", anchor: .bottom) } } }
+            }
+            }
 
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).padding(.horizontal, 20)
@@ -230,6 +237,12 @@ struct ConfirmationSheet: View {
         if let d = CoreFormat.parseLessonDate(inferred.lessonDate, timeZone: tz) { lessonDate = d }
         if let s = inferred.startedAt { hasStartTime = true; startTime = s; lessonDate = s }
         suggestions = MappingMatcher.rank(MatchContext(session: session), mappings: model.mappings, rooms: model.rooms)
+        if DemoData.mode == "files" {
+            let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            files = [PendingAttachment(url: tmp, filename: "Story Opening Planning Pro Forma 15-11-26 (1) — a very long file name for testing.pdf", byteCount: 563_000, role: .studentWork),
+                     PendingAttachment(url: tmp, filename: "Lesson slides.pptx", byteCount: 2_400_000, role: .slides),
+                     PendingAttachment(url: tmp, filename: "Model answer.docx", byteCount: 41_000, role: .exemplar, includeInContext: false)]
+        }
         if let best = suggestions.first {
             studentId = best.mappingId.map { "m:\($0)" } ?? "r:\(best.roomId)"
             if !options.contains(where: { $0.id == studentId }) { studentId = "" }
