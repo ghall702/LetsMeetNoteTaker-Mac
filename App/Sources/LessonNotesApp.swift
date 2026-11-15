@@ -8,6 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in AppModel.shared.start() }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppModel.shared.store.flush() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -41,6 +45,7 @@ struct LessonNotesApp: App {
                 Divider()
                 Button("Check Website Statuses Now") { Task { await model.syncStatuses(force: true) } }.keyboardShortcut("r", modifiers: [.command, .shift])
                 Button(model.isPaused ? "Resume Processing" : "Pause Processing") { model.setPaused(!model.isPaused) }
+                Button(model.settings.openAIPaused ? "Resume OpenAI Activity" : "Pause OpenAI Activity") { model.setOpenAIPaused(!model.settings.openAIPaused) }
             }
         }
 

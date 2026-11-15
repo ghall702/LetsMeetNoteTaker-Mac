@@ -11,6 +11,7 @@ struct DashboardView: View {
                 header
                 if !model.setupIssues.isEmpty { setupCard }
                 if let e = model.watchError { Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                if model.settings.openAIPaused { openAIPausedCard }
                 Card(title: "OpenAI usage today", systemImage: "chart.bar.xaxis") {
                     UsagePanel(compact: true)
                     Button("Usage history…") { model.sidebar = .usage }.buttonStyle(.link)
@@ -33,6 +34,11 @@ struct DashboardView: View {
                 Text(statusLine).foregroundStyle(.secondary)
             }
             Spacer()
+            Button { model.setOpenAIPaused(!model.settings.openAIPaused) } label: {
+                Label(model.settings.openAIPaused ? "Resume OpenAI" : "Pause OpenAI",
+                      systemImage: model.settings.openAIPaused ? "play.circle" : "pause.circle")
+            }
+            .help("Pause OpenAI: keep transcribing, but don't use OpenAI to write notes until you resume")
             Button { model.startImport(files: true) } label: { Label("Import MP4s…", systemImage: "film.stack") }
             Button { model.startImport(files: false) } label: { Label("Import Folder…", systemImage: "folder.badge.plus") }
             Menu {
@@ -55,6 +61,23 @@ struct DashboardView: View {
         else { parts.append("Folder watching is off") }
         if let s = model.lastSync { parts.append("statuses checked \(s.formatted(date: .omitted, time: .shortened))") }
         return parts.joined(separator: " · ")
+    }
+
+    var openAIPausedCard: some View {
+        let waiting = model.activeJobs.filter { model.isHeldForOpenAI($0.job) }.count
+        return Card(title: "OpenAI activity is paused", systemImage: "pause.circle") {
+            Text("Recordings are still transcribed on this Mac, but notes are not written until you resume, so your OpenAI allowance is kept"
+                 + (model.settings.openAIPauseAllowsToday ? " for today's lessons." : ".")
+                 + (waiting > 0 ? " \(waiting) transcribed lesson\(waiting == 1 ? " is" : "s are") waiting." : ""))
+                .font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Toggle("Still write notes for lessons dated today", isOn: Binding(
+                    get: { model.settings.openAIPauseAllowsToday },
+                    set: { v in model.updateSettings { $0.openAIPauseAllowsToday = v }; model.setOpenAIPaused(true) }))
+                Spacer()
+                Button("Resume OpenAI") { model.setOpenAIPaused(false) }.buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     var setupCard: some View {
@@ -114,6 +137,10 @@ struct DashboardView: View {
                 let l = item.lesson, j = item.job
                 HStack(alignment: .top) {
                     JobProgressRow(lesson: l, job: j)
+                    if model.isHeldForOpenAI(j) {
+                        Button("Write Notes Now") { model.writeNotesNow(j) }
+                            .help("Use OpenAI for this lesson now, even though OpenAI is paused")
+                    }
                     Button { model.cancel(j) } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("Cancel").accessibilityLabel("Cancel \(l.pupilName)")
                 }

@@ -165,6 +165,8 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var lessonLengthAttempts: Int?
     /// Set when the website rejected the value (not retried automatically).
     public var lessonLengthError: String?
+    /// "Write Notes Now": this job may use OpenAI even while OpenAI is paused.
+    public var openAIOverride: Bool?
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

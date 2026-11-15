@@ -15,6 +15,10 @@ struct MenuBarView: View {
                 if !model.isOnline { Label("Offline", systemImage: "wifi.slash").font(.caption).foregroundStyle(.orange) }
             }
             MenuUsageLine()
+            if model.settings.openAIPaused {
+                Label("OpenAI paused — transcribing only" + (model.settings.openAIPauseAllowsToday ? " (today's lessons still get notes)" : ""),
+                      systemImage: "pause.circle").font(.caption).foregroundStyle(.purple)
+            }
             if !model.detections.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("New recordings").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -46,6 +50,7 @@ struct MenuBarView: View {
             Button("Import Folder…") { model.startImport(files: false) }
             Button("Check Website Statuses") { Task { await model.syncStatuses(force: true) } }
             Button(model.isPaused ? "Resume Processing" : "Pause Processing") { model.setPaused(!model.isPaused) }
+            Button(model.settings.openAIPaused ? "Resume OpenAI Activity" : "Pause OpenAI Activity") { model.setOpenAIPaused(!model.settings.openAIPaused) }
             Button("Settings…") { NSApp.activate(ignoringOtherApps: true); openSettings() }.keyboardShortcut(",")
             Divider()
             Button("Quit Lesson Notes") { NSApp.terminate(nil) }.keyboardShortcut("q")

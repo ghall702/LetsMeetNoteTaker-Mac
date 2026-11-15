@@ -84,19 +84,56 @@ public final class LibraryStore: @unchecked Sendable {
 
     private func write<T: Encodable>(_ value: T, _ name: String) {
         if protectedFiles.contains(name) || protectedFiles.contains("*") {
-            lastWriteError = "\(name) was not saved because the data folder is protected after a problem opening it."
+            setWriteError("\(name) was not saved because the data folder is protected after a problem opening it.")
             return
         }
-        do {
-            let data = try JSONCoding.encoder(pretty: false).encode(value)
-            try data.write(to: file(name), options: [.atomic])
-        } catch {
-            // Disk errors are surfaced through `lastWriteError`.
-            lastWriteError = error.localizedDescription
+        let url = file(name)
+        let job: () -> Void = { [weak self] in
+            do {
+                let data = try JSONCoding.encoder(pretty: false).encode(value)
+                try data.write(to: url, options: [.atomic])
+            } catch {
+                // Disk errors are surfaced through `lastWriteError`.
+                self?.setWriteError(error.localizedDescription)
+            }
         }
+        guard deferredWrites else { job(); return }
+        // Saving is done off the caller's thread so the window never waits for a large library
+        // to be encoded. Changes are coalesced: only the newest snapshot of each file is written.
+        writeLock.lock()
+        pendingWrites[name] = job
+        let schedule = !writeScheduled
+        writeScheduled = true
+        writeLock.unlock()
+        if schedule { writeQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.drainWrites() } }
     }
 
-    public private(set) var lastWriteError: String?
+    private func drainWrites() {
+        writeLock.lock()
+        let jobs = pendingWrites
+        pendingWrites = [:]
+        writeScheduled = false
+        writeLock.unlock()
+        for (_, job) in jobs.sorted(by: { $0.key < $1.key }) { job() }
+    }
+
+    /// Writes any changes still waiting to be saved, and waits until they are on disk.
+    public func flush() {
+        guard deferredWrites else { return }
+        writeQueue.sync { drainWrites() }
+    }
+
+    private func setWriteError(_ m: String) { writeLock.lock(); writeErrorStorage = m; writeLock.unlock() }
+    public var lastWriteError: String? { writeLock.lock(); defer { writeLock.unlock() }; return writeErrorStorage }
+    private var writeErrorStorage: String?
+
+    /// When true (the app), files are saved on a background queue a moment after each change.
+    /// Tests keep synchronous saving so every change is on disk immediately.
+    public var deferredWrites = false
+    private let writeQueue = DispatchQueue(label: "LessonNotes.LibraryStore.write", qos: .utility)
+    private let writeLock = NSLock()
+    private var pendingWrites: [String: () -> Void] = [:]
+    private var writeScheduled = false
 
     public var backupsDirectory: URL { directory.appendingPathComponent("Backups", isDirectory: true) }
 

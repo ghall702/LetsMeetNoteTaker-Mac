@@ -10,6 +10,10 @@ struct StatusChip: View {
 
     init(job: Job) {
         text = job.displayStatus
+        if job.statusMessage == JobEngine.openAIPausedMessage && job.notes == nil && job.stage.isActive {
+            text = "OpenAI paused"; color = .purple; icon = "pause.circle"
+            return
+        }
         switch job.stage {
         case .submitted:
             switch job.remoteStatus ?? .pending {

@@ -125,6 +125,8 @@ final class AppModel: ObservableObject {
             store = try! LibraryStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("LessonNotes-fallback"))
             startupError = "Could not open the data folder: \(error.localizedDescription)"
         }
+        // Save in the background (coalesced) so the window never waits on a large library file.
+        store.deferredWrites = true
         whisper = WhisperModelManager()
         banner = startupError
         let health = store.health
@@ -652,6 +654,27 @@ final class AppModel: ObservableObject {
             banner = error.localizedDescription
         }
     }
+
+    /// Pause OpenAI: transcription carries on; note-writing waits (today's lessons optionally excepted).
+    func setOpenAIPaused(_ paused: Bool) {
+        updateSettings { $0.openAIPaused = paused }
+        if !paused {
+            for l in store.allLessons {
+                for j in l.jobs where j.statusMessage == JobEngine.openAIPausedMessage {
+                    store.updateJob(id: j.id) { $0.statusMessage = nil }
+                }
+            }
+        }
+        Task { await engine.tick() }
+    }
+
+    /// Lets one lesson use OpenAI now, even while OpenAI is paused.
+    func writeNotesNow(_ job: Job) {
+        store.updateJob(id: job.id) { $0.openAIOverride = true; $0.statusMessage = nil }
+        Task { await engine.tick() }
+    }
+
+    func isHeldForOpenAI(_ job: Job) -> Bool { job.statusMessage == JobEngine.openAIPausedMessage && job.notes == nil }
 
     func setPaused(_ paused: Bool) {
         isPaused = paused

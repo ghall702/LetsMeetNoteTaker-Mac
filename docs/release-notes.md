@@ -8,7 +8,11 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.4
+### What's in 1.5
+- **Pause OpenAI Activity** (Dashboard button, menu bar and Lessons menu): recordings keep being transcribed on this Mac, but no notes are written with OpenAI until you resume — so a long backlog can transcribe without using today's allowance. Lessons dated today still get notes unless you turn that off, and **Write Notes Now** lets any single lesson through. Notes that are already written still upload.
+- **Smoother app:** data is saved in the background instead of making the window wait (the cause of the spinning beachball, especially with a large history), and transcripts in History load in the background.
+
+### Also in 1.4
 - **Lesson length on Let's Meet:** every new note now includes `lesson_length` (total recording time in whole seconds, capped at 12 hours; left out when unknown). Visible only to you in Admin Tools.
 - **Existing notes backfilled automatically:** for notes already sent by earlier versions, the app quietly sets just the lesson length on the website, one at a time in the background. The notes themselves are **not** resent — their content, version and approval status stay exactly as they are. Notes deleted on the website are marked as such; rate limits are respected.
 - History shows each lesson's length and whether it is on the website.

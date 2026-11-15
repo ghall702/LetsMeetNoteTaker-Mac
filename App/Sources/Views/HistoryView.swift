@@ -318,6 +318,7 @@ struct JobSection: View {
     @State private var confirmDeleteTranscript = false
     @State private var regenerate: RegenerateRequest?
     @State private var showVersions = false
+    @State private var transcriptText: LoadedTranscript?
 
     var body: some View {
         Card(title: lesson.jobs.count > 1 ? "Note \(job.partLetter.uppercased())" : "Lesson note", systemImage: "doc.text") {
@@ -407,8 +408,8 @@ struct JobSection: View {
                 }
             }
 
-            if job.hasTranscript, let t = model.store.transcript(jobId: job.id) {
-                let text = t.renderedText(timeZone: lesson.timeZone)
+            if job.hasTranscript, let loaded = transcriptText, loaded.jobId == job.id {
+                let text = loaded.text
                 DisclosureGroup(isExpanded: $showTranscript) {
                     ReadOnlyText(text: text).frame(height: 320)
                     HStack {
@@ -421,11 +422,21 @@ struct JobSection: View {
                             .help("Transcripts can only be deleted after the note has been uploaded.")
                     }
                 } label: {
-                    Text("Transcript · \(t.wordCount) words · \(APILimits.utf8Bytes(text).byteStringDecimal)")
+                    Text("Transcript · \(loaded.words) words · \(loaded.bytes.byteStringDecimal)")
                 }
             } else if let purged = job.transcriptPurgedAt {
                 Text("Local transcript deleted \(purged.shortDateTime) (retention setting or manual deletion).").font(.caption).foregroundStyle(.secondary)
             }
+        }
+        .task(id: TranscriptKey(jobId: job.id, available: job.hasTranscript)) {
+            // Read and render the transcript once, off the main thread (it can be large).
+            guard job.hasTranscript else { transcriptText = nil; return }
+            let store = model.store, id = job.id, tz = lesson.timeZone
+            transcriptText = await Task.detached(priority: .userInitiated) { () -> LoadedTranscript? in
+                guard let t = store.transcript(jobId: id) else { return nil }
+                let text = t.renderedText(timeZone: tz)
+                return LoadedTranscript(jobId: id, text: text, words: t.wordCount, bytes: APILimits.utf8Bytes(text))
+            }.value
         }
         .onAppear {
             if model.demoReviewDraft, let d = job.draftVersions.last {
@@ -518,4 +529,16 @@ extension Int {
         f.locale = Locale(identifier: "en_GB")
         return (f.string(from: NSNumber(value: self)) ?? String(self)) + " bytes"
     }
+}
+
+struct LoadedTranscript: Sendable {
+    var jobId: UUID
+    var text: String
+    var words: Int
+    var bytes: Int
+}
+
+struct TranscriptKey: Hashable {
+    var jobId: UUID
+    var available: Bool
 }

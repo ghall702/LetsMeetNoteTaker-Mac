@@ -49,8 +49,19 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var maxConcurrentTranscriptions: Int = 1
     /// OpenAI usage counter, pricing and free-allowance protection.
     public var usage = UsageSettings()
+    /// Pause OpenAI: transcription carries on, but no notes are written (except as allowed below).
+    public var openAIPaused: Bool = false
+    /// While paused, still write notes for lessons dated today (in the app's time zone).
+    public var openAIPauseAllowsToday: Bool = true
 
     public init() {}
+
+    /// Whether automatic note-writing for this lesson/job is held by "Pause OpenAI".
+    public func openAIHeld(lessonDate: String, job: Job, now: Date) -> Bool {
+        guard openAIPaused, job.openAIOverride != true else { return false }
+        if openAIPauseAllowsToday && lessonDate == CoreFormat.lessonDateString(now, timeZone: timeZone) { return false }
+        return true
+    }
 
     public var timeZone: TimeZone {
         if let id = timeZoneIdentifier, let tz = TimeZone(identifier: id) { return tz }
@@ -60,7 +71,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case websiteBaseURL, openAIModel, reasoningEffort, globalPrompt, transcriptionModel, transcriptionLanguage, zoomFolderPath,
              zoomFolderBookmark, watchFolder, autoProcessAfterConfirm, retention, timeZoneIdentifier,
-             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions, usage
+             chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions, usage,
+             openAIPaused, openAIPauseAllowsToday
     }
 
     public init(from decoder: Decoder) throws {
@@ -86,5 +98,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         maxConcurrentTranscriptions = min(8, max(1, try c.decodeIfPresent(Int.self, forKey: .maxConcurrentTranscriptions) ?? 1))
         usage = (try? c.decodeIfPresent(UsageSettings.self, forKey: .usage)) ?? d.usage
+        openAIPaused = try c.decodeIfPresent(Bool.self, forKey: .openAIPaused) ?? d.openAIPaused
+        openAIPauseAllowsToday = try c.decodeIfPresent(Bool.self, forKey: .openAIPauseAllowsToday) ?? d.openAIPauseAllowsToday
     }
 }

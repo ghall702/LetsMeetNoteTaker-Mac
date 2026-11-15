@@ -240,12 +240,17 @@ public actor JobEngine {
     /// Starts every job that is due. Whisper transcriptions and OpenAI/website work use separate
     /// pools: at most `maxConcurrentTranscriptions` transcriptions (reduced under memory pressure;
     /// running ones are never stopped) and `maxConcurrentJobs` network jobs.
+    public static let openAIPausedMessage = "Transcribed — waiting while OpenAI is paused"
+
     public func tick() {
         guard !isPaused else { return }
         let t = now()
         let networkLimit = max(1, min(4, store.settings.maxConcurrentJobs))
         let transcriptionLimit = transcriptionLimit()
         let online = deps.isOnline()
+        let settings = store.settings
+        var lessonDates: [UUID: String] = [:]
+        for l in store.allLessons { for j in l.jobs { lessonDates[j.id] = l.lessonDate } }
         let candidates = store.allLessons.flatMap { l in l.jobs }
             .filter { $0.stage.isActive && running[$0.id] == nil }
             .filter { ($0.nextAttemptAt ?? .distantPast) <= t }
@@ -261,6 +266,12 @@ public actor JobEngine {
                     await self?.finished(jobId: id)
                 }
             } else {
+                if job.notes == nil, settings.openAIHeld(lessonDate: lessonDates[id] ?? "", job: job, now: t) {
+                    if job.statusMessage != Self.openAIPausedMessage {
+                        store.updateJob(id: id, now: t) { $0.statusMessage = Self.openAIPausedMessage }
+                    }
+                    continue
+                }
                 guard online else {
                     if job.statusMessage != "Waiting for internet" {
                         store.updateJob(id: job.id, now: t) { $0.statusMessage = "Waiting for internet" }
@@ -415,6 +426,10 @@ public actor JobEngine {
                 case .summarising:
                     guard phase == .network else { return }
                     if job.notes != nil { update(jobId) { $0.stage = .submitting }; continue }
+                    if store.settings.openAIHeld(lessonDate: lesson.lessonDate, job: job, now: now()) {
+                        update(jobId) { $0.statusMessage = Self.openAIPausedMessage }
+                        return
+                    }
                     guard deps.isOnline() else { update(jobId) { $0.statusMessage = "Waiting for internet" }; return }
                     try await summariseStage(lesson: lesson, job: job)
                 case .submitting:
@@ -604,6 +619,7 @@ public actor JobEngine {
         update(job.id) { $0.statusMessage = "Uploading notes and full transcript" }
         emit(.progress(jobId: job.id, fraction: 0.5, message: "Uploading notes and full transcript"))
         let submitter = try deps.makeSubmitter()
+        store.flush() // the frozen payload must be on disk before it is sent (idempotent retries)
         let response = try await submitter.submit(body: payload!)
         update(job.id) {
             $0.noteId = response.noteId
@@ -735,6 +751,7 @@ extension JobEngine {
                 store.updateJob(id: jobId, now: now()) { $0.replacement = frozen }
             }
             emit(.progress(jobId: jobId, fraction: 0.5, message: "Replacing notes on the website"))
+            store.flush()
             let resp = try await replacer.replace(noteId: noteRef, body: rep.body!)
             completeReplacement(jobId, version: version, response: resp)
         } catch let e as LetsMeetAPIError {
