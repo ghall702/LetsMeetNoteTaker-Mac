@@ -484,6 +484,11 @@ struct GeneralSettings: View {
                 if LaunchAtLogin.requiresApproval { Text("Approve Lesson Notes in System Settings → General → Login Items.").font(.caption).foregroundStyle(.orange) }
                 if let launchError { Text(launchError).font(.caption).foregroundStyle(.red) }
             }
+            Section("Lesson files") {
+                Toggle("Start PDF names with “macOS Preview”", isOn: Binding(get: { model.settings.pdfPreviewPrefix }, set: { v in model.updateSettings { $0.pdfPreviewPrefix = v } }))
+                Text("When on, a PDF you attach is named like “macOS Preview Document1.pdf” in the app, for OpenAI and on LetsMeet. Applies to PDFs added from now on.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Notifications") {
                 Toggle("Notify when notes are submitted", isOn: Binding(get: { model.settings.notifyOnSubmitted }, set: { v in model.updateSettings { $0.notifyOnSubmitted = v } }))
             }

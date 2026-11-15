@@ -11,6 +11,7 @@ struct PendingAttachment: Identifiable, Equatable {
     var byteCount: Int
     var role: AttachmentRole = .other
     var includeInContext = true
+    var shareWithPupil = true
 }
 
 enum AttachmentPicker {
@@ -30,23 +31,26 @@ enum AttachmentPicker {
     }
 }
 
-/// One file: name, size, what it is (for OpenAI) and whether OpenAI sees it at all.
+/// One file: name, size, what it is (for OpenAI), whether OpenAI sees it and whether the
+/// pupil gets it.
 struct AttachmentRowView: View {
     var filename: String
     var byteCount: Int
     @Binding var role: AttachmentRole
     @Binding var includeInContext: Bool
+    @Binding var shareWithPupil: Bool
     var onOpen: (() -> Void)?
     var onRemove: (() -> Void)?
-    var contextOnly: Bool
+    var canChangeSharing: Bool
 
-    init(filename: String, byteCount: Int, role: Binding<AttachmentRole>, includeInContext: Binding<Bool>,
-         contextOnly: Bool = false, onOpen: (() -> Void)? = nil, onRemove: (() -> Void)? = nil) {
-        self.contextOnly = contextOnly
+    init(filename: String, byteCount: Int, role: Binding<AttachmentRole>, includeInContext: Binding<Bool>, shareWithPupil: Binding<Bool>,
+         canChangeSharing: Bool = true, onOpen: (() -> Void)? = nil, onRemove: (() -> Void)? = nil) {
         self.filename = filename
         self.byteCount = byteCount
         self._role = role
         self._includeInContext = includeInContext
+        self._shareWithPupil = shareWithPupil
+        self.canChangeSharing = canChangeSharing
         self.onOpen = onOpen
         self.onRemove = onRemove
     }
@@ -62,11 +66,6 @@ struct AttachmentRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(-1)
                     .help(filename)
-                if contextOnly {
-                    Text("Context only").font(.caption2.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.15), in: Capsule()).foregroundStyle(.purple).fixedSize()
-                        .help("Used as OpenAI context only; not uploaded to LetsMeet")
-                }
                 Text(Int64(byteCount).formatted(.byteCount(style: .file))).font(.caption).foregroundStyle(.secondary).fixedSize()
                 if let onOpen { Button("Open") { onOpen() }.buttonStyle(.link).fixedSize() }
                 if let onRemove {
@@ -82,29 +81,43 @@ struct AttachmentRowView: View {
             .frame(maxWidth: 480, alignment: .leading)
             .disabled(!includeInContext)
             .help("Tells OpenAI what this file is")
-            Toggle(isOn: $includeInContext) {
-                Text(includeInContext ? "Include in AI context"
-                     : (contextOnly ? "Include in AI context — off: this context-only file is not used at all"
-                                    : "Include in AI context — off: uploaded for the pupil only, not sent to OpenAI"))
+            HStack(spacing: 18) {
+                Toggle("Include in AI context", isOn: $includeInContext)
+                    .toggleStyle(.checkbox)
+                    .help("Off: OpenAI never sees this file")
+                Toggle("Share with pupil", isOn: $shareWithPupil)
+                    .toggleStyle(.checkbox)
+                    .disabled(!canChangeSharing)
+                    .help("Off: the file stays on this Mac and is not uploaded to LetsMeet")
             }
-            .toggleStyle(.checkbox)
-            .help("Off: the file is only uploaded for the pupil; OpenAI never sees it")
+            if let note = statusNote {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
+
+    var statusNote: String? {
+        switch (includeInContext, shareWithPupil) {
+        case (true, true): return nil
+        case (true, false): return "Used by OpenAI only — kept on this Mac, not uploaded for the pupil."
+        case (false, true): return "Uploaded for the pupil only — not sent to OpenAI."
+        case (false, false): return "Not used: neither sent to OpenAI nor uploaded."
+        }
+    }
 }
 
 /// Lesson files for one job (History and the Regenerate sheet).
-/// - Before upload: files can be swapped (while the lesson isn't running).
-/// - After upload: the website can't change a note's files, so extra files are "context only",
-///   and "Redo with Different Files" makes a new note from the saved transcript.
+/// - Before upload: files can be changed while the lesson isn't mid-upload.
+/// - After upload: changes stay on this Mac until George sends them — Update Files Only
+///   (no re-approval) or together with regenerated notes (back to Waiting for approval).
 struct JobAttachmentsSection: View {
     @EnvironmentObject var model: AppModel
     var job: Job
     var showsHeader: Bool
     var onRegenerate: (() -> Void)?
-    @State private var confirmRedo = false
+    @State private var confirmFilesOnly = false
 
     init(job: Job, showsHeader: Bool = true, onRegenerate: (() -> Void)? = nil) {
         self.job = job
@@ -122,60 +135,82 @@ struct JobAttachmentsSection: View {
                 Spacer()
                 if job.attachmentsEditable {
                     Button("Add Files…") { model.addFiles(AttachmentPicker.choose(), to: job) }
-                        .disabled(job.uploadAttachments.count >= AttachmentRules.maxFiles)
-                } else if job.hasTranscript {
-                    Button("Add Context-Only File…") { model.addFiles(AttachmentPicker.choose(), to: job, contextOnly: true) }
-                        .help("Used by OpenAI when you regenerate; not uploaded (the website can't add files to an uploaded note)")
-                }
-                if uploaded && job.hasTranscript {
-                    Button("Redo with Different Files…") { confirmRedo = true }
-                        .help("Make a new note from the saved transcript with a different set of files")
+                        .disabled(files.count >= LibraryStore.maxStoredFiles)
                 }
             }
-            if job.filesChangedSinceNotes == true, job.notes != nil {
-                HStack {
-                    Label("The files or their AI settings have changed since these notes were written.", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.callout)
-                    Spacer()
-                    if let onRegenerate { Button("Regenerate Notes…") { onRegenerate() }.buttonStyle(.borderedProminent) }
+            if job.filesChangedSinceNotes == true, job.notes != nil, let onRegenerate {
+                banner("The files or their AI settings have changed since these notes were written.", icon: "arrow.triangle.2.circlepath") {
+                    Button("Regenerate Notes…") { onRegenerate() }
                 }
-                .padding(8)
-                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+            if job.websiteFilesOutOfDate {
+                banner("The files shared with the pupil differ from the ones on LetsMeet.", icon: "icloud.and.arrow.up") {
+                    Button("Update Files on LetsMeet") { confirmFilesOnly = true }.buttonStyle(.borderedProminent)
+                    if let onRegenerate { Button("Regenerate Notes with These Files…") { onRegenerate() } }
+                }
+            }
+            if let fu = job.fileUpdate {
+                HStack {
+                    switch fu.state {
+                    case .queued:
+                        ProgressView().controlSize(.small)
+                        Text(fu.message ?? "Updating files on LetsMeet…").font(.callout)
+                    case .failed, .noteDeleted:
+                        Label(fu.message ?? "Updating the files failed.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+                        Spacer()
+                        if fu.state == .failed { Button("Retry") { model.retryFileUpdate(job) } }
+                        Button("Dismiss") { model.discardFileUpdate(job) }
+                    }
+                }
             }
             if files.isEmpty {
-                Text(job.attachmentsEditable ? "Optional: slides, the pupil's work or your model answers. They help OpenAI write the notes and the pupil can download them once you approve."
-                                             : "No files were attached to this note.")
+                Text(job.attachmentsEditable ? "Optional: slides, the pupil's work or your model answers. They can help OpenAI write the notes and be shared with the pupil once you approve."
+                                             : "No files.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(files) { a in
                 AttachmentRowView(filename: a.filename, byteCount: a.byteCount,
                                   role: Binding(get: { a.role }, set: { model.setAttachmentRole(job: job, id: a.id, role: $0) }),
                                   includeInContext: Binding(get: { a.includeInContext }, set: { model.setAttachmentIncluded(job: job, id: a.id, included: $0) }),
-                                  contextOnly: a.contextOnly,
+                                  shareWithPupil: Binding(get: { a.shareWithPupil }, set: { model.setAttachmentShared(job: job, id: a.id, shared: $0) }),
+                                  canChangeSharing: job.attachmentsEditable,
                                   onOpen: { NSWorkspace.shared.open(model.store.attachmentURL(jobId: job.id, a)) },
-                                  onRemove: (job.attachmentsEditable || a.contextOnly) ? { model.removeAttachment(job: job, id: a.id) } : nil)
+                                  onRemove: job.attachmentsEditable ? { model.removeAttachment(job: job, id: a.id) } : nil)
                 Divider()
             }
-            if !files.isEmpty || uploaded {
-                Text(caption).font(.caption).foregroundStyle(.secondary)
+            if uploaded, let remote = job.remoteFiles {
+                Text(remote.isEmpty ? "On LetsMeet: no files." : "On LetsMeet: " + remote.map { f in
+                    f.filename + (f.size.map { " (" + Int64($0).formatted(.byteCount(style: .file)) + ")" } ?? "")
+                }.joined(separator: ", "))
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
+            Text(caption).font(.caption).foregroundStyle(.secondary)
         }
-        .alert("Redo with different files?", isPresented: $confirmRedo) {
-            Button("Make New Note") { model.redoWithDifferentFiles(job) }
+        .alert("Update the files on LetsMeet?", isPresented: $confirmFilesOnly) {
+            Button("Update Files") { model.updateFilesOnWebsite(job) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("A new lesson is created from the saved transcript (no re-transcription) with a copy of these files. It waits in History so you can swap files, then press Start. It is uploaded as a NEW note, because LetsMeet can't change the files of an uploaded note — afterwards, delete or reject the old note in Admin Tools.")
+            Text(job.remoteStatus == .published
+                 ? "The note is published, so the pupil will see the new files straight away. The notes themselves don't change and don't need approving again."
+                 : "The note's files are replaced. The notes themselves don't change.")
         }
+    }
+
+    func banner<B: View>(_ text: String, icon: String, @ViewBuilder buttons: () -> B) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(text, systemImage: icon).font(.callout)
+            HStack { Spacer(); buttons() }
+        }
+        .padding(8)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 
     var caption: String {
         if uploaded {
-            return "Uploaded files can't be changed on LetsMeet. You can change any file's type or AI switch, or add context-only files, and then Regenerate Notes (the website note is updated, its files stay the same). To change the files pupils download, use Redo with Different Files."
+            return "Changes to files here stay on this Mac until you send them: Update Files on LetsMeet (the note stays approved), or Regenerate Notes — accepting new notes also sends the current shared files (the note returns to Waiting for approval)."
         }
-        if job.attachmentsEditable && job.notes != nil {
-            return "Notes were already written. Changing files here means a fresh upload (new submission ID); regenerate to use the new files."
-        }
-        if !job.attachmentsEditable { return "Files can be swapped while this lesson isn't running (e.g. when it is held or needs attention)." }
-        return "Files can be added or removed until the note is uploaded."
+        if job.stage == .submitting { return "Files can't be changed while the note is uploading." }
+        if job.notes != nil { return "Notes were already written. Changing shared files means a fresh upload (new submission ID); regenerate to use changed files as context." }
+        return "Files can be added or removed until the note is uploaded. Up to 5 shared with the pupil."
     }
 }

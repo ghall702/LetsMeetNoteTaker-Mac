@@ -408,31 +408,31 @@ public final class LibraryStore: @unchecked Sendable {
     }
 
     /// Copies a file into the app's storage and adds it to the job (call off the main thread).
-    /// The original file is never changed.
+    /// The original file is never changed. PDFs are stored as "macOS Preview <name>.pdf".
     @discardableResult
-    public func addAttachment(from source: URL, toJob jobId: UUID, role: AttachmentRole = .other, contextOnly: Bool = false,
-                              now: Date = Date()) throws -> LessonAttachment {
-        guard let job = job(id: jobId) else { throw AttachmentError.notEditable }
-        if !contextOnly && !job.attachmentsEditable { throw AttachmentError.notEditable }
-        if countFor(job, contextOnly) >= AttachmentRules.maxFiles { throw AttachmentRules.Problem.tooMany }
-        let name = AttachmentRules.sanitisedFilename(source.lastPathComponent)
+    public func addAttachment(from source: URL, toJob jobId: UUID, role: AttachmentRole = .other, shareWithPupil: Bool = true,
+                              includeInContext: Bool = true, now: Date = Date()) throws -> LessonAttachment {
+        guard let job = job(id: jobId), job.attachmentsEditable else { throw AttachmentError.notEditable }
+        if (job.attachments ?? []).count >= Self.maxStoredFiles { throw AttachmentRules.Problem.tooMany }
+        if shareWithPupil && job.uploadAttachments.count >= AttachmentRules.maxFiles { throw AttachmentRules.Problem.tooMany }
+        let name = AttachmentRules.storedFilename(source.lastPathComponent, pdfPreviewPrefix: settings.pdfPreviewPrefix)
         let size = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.intValue ?? 0
         if let p = AttachmentRules.check(filename: name, byteCount: size) { throw p }
         let data = try Data(contentsOf: source)
         if let p = AttachmentRules.check(filename: name, byteCount: data.count) { throw p }
         let a = LessonAttachment(filename: name, byteCount: data.count, sha256: SHA256Hasher.hex(of: data), role: role,
-                                 contextOnly: contextOnly, addedAt: now)
+                                 includeInContext: includeInContext, shareWithPupil: shareWithPupil, addedAt: now)
         let url = attachmentURL(jobId: jobId, a)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: [.atomic])
         var added = false
         var problem: Error?
-        let newId = contextOnly ? nil : freshSubmissionId(jobId)
+        let newId = shareWithPupil ? freshSubmissionId(jobId) : nil
         updateJob(id: jobId, now: now) { j in
-            guard contextOnly || j.attachmentsEditable else { problem = AttachmentError.notEditable; return }
-            guard countFor(j, contextOnly) < AttachmentRules.maxFiles else { problem = AttachmentRules.Problem.tooMany; return }
+            guard j.attachmentsEditable else { problem = AttachmentError.notEditable; return }
+            guard !shareWithPupil || j.uploadAttachments.count < AttachmentRules.maxFiles else { problem = AttachmentRules.Problem.tooMany; return }
             j.attachments = (j.attachments ?? []) + [a]
-            Self.filesChanged(&j, uploadsChanged: !contextOnly, newSubmissionId: newId)
+            Self.filesChanged(&j, uploadsChanged: shareWithPupil, contextChanged: includeInContext, newSubmissionId: newId)
             added = true
         }
         if !added {
@@ -442,15 +442,18 @@ public final class LibraryStore: @unchecked Sendable {
         return a
     }
 
+    /// Shared files are limited by the website (5); a few more may be kept for AI context only.
+    public static let maxStoredFiles = 10
+
     public func removeAttachment(jobId: UUID, id: UUID) throws {
         guard let job = job(id: jobId), let a = job.attachments?.first(where: { $0.id == id }) else { return }
-        guard a.contextOnly || job.attachmentsEditable else { throw AttachmentError.notEditable }
-        let newId = a.contextOnly ? nil : freshSubmissionId(jobId)
+        guard job.attachmentsEditable else { throw AttachmentError.notEditable }
+        let newId = a.shareWithPupil ? freshSubmissionId(jobId) : nil
         updateJob(id: jobId) { j in
             j.attachments?.removeAll { $0.id == id }
-            Self.filesChanged(&j, uploadsChanged: !a.contextOnly, newSubmissionId: newId)
+            Self.filesChanged(&j, uploadsChanged: a.shareWithPupil, contextChanged: a.includeInContext, newSubmissionId: newId)
         }
-        try? FileManager.default.removeItem(at: attachmentURL(jobId: jobId, a).deletingLastPathComponent())
+        pruneAttachmentFiles(jobId: jobId)
     }
 
     /// The file's type only affects what OpenAI is told, so it can be changed at any time.
@@ -458,25 +461,56 @@ public final class LibraryStore: @unchecked Sendable {
         updateJob(id: jobId) { j in
             if let i = j.attachments?.firstIndex(where: { $0.id == id }), j.attachments?[i].role != role {
                 j.attachments?[i].role = role
-                Self.filesChanged(&j, uploadsChanged: false, newSubmissionId: nil)
+                Self.filesChanged(&j, uploadsChanged: false, contextChanged: true, newSubmissionId: nil)
             }
-            if let i = j.submittedAttachments?.firstIndex(where: { $0.id == id }) { j.submittedAttachments?[i].role = role }
         }
     }
 
-    /// Whether OpenAI sees the file; it is uploaded for the pupil either way. Can change at any time.
+    /// Whether OpenAI sees the file. Can change at any time.
     public func setAttachmentIncluded(jobId: UUID, id: UUID, included: Bool) {
         updateJob(id: jobId) { j in
             if let i = j.attachments?.firstIndex(where: { $0.id == id }), j.attachments?[i].includeInContext != included {
                 j.attachments?[i].includeInContext = included
-                Self.filesChanged(&j, uploadsChanged: false, newSubmissionId: nil)
+                Self.filesChanged(&j, uploadsChanged: false, contextChanged: true, newSubmissionId: nil)
             }
-            if let i = j.submittedAttachments?.firstIndex(where: { $0.id == id }) { j.submittedAttachments?[i].includeInContext = included }
         }
     }
 
-    private func countFor(_ j: Job, _ contextOnly: Bool) -> Int {
-        (j.attachments ?? []).filter { $0.contextOnly == contextOnly }.count
+    /// Whether the file is uploaded for the pupil.
+    public func setAttachmentShared(jobId: UUID, id: UUID, shared: Bool) throws {
+        guard let job = job(id: jobId), job.attachmentsEditable else { throw AttachmentError.notEditable }
+        if shared && job.uploadAttachments.count >= AttachmentRules.maxFiles { throw AttachmentRules.Problem.tooMany }
+        let newId = freshSubmissionId(jobId)
+        updateJob(id: jobId) { j in
+            if let i = j.attachments?.firstIndex(where: { $0.id == id }), j.attachments?[i].shareWithPupil != shared {
+                j.attachments?[i].shareWithPupil = shared
+                Self.filesChanged(&j, uploadsChanged: true, contextChanged: false, newSubmissionId: newId)
+            }
+        }
+    }
+
+    /// Queues "update files only" for an uploaded note: LetsMeet gets the current shared files.
+    public func queueFileUpdate(jobId: UUID, now: Date = Date()) throws {
+        guard let job = job(id: jobId), job.stage == .submitted else { throw AttachmentError.notEditable }
+        let files = job.uploadAttachments
+        if let p = AttachmentRules.check(files, noteJSONBytes: 64) { throw p }
+        updateJob(id: jobId, now: now) { $0.fileUpdate = PendingFileUpdate(files: files, createdAt: now) }
+    }
+
+    /// Deletes stored copies no longer referenced by the lesson, the files on LetsMeet or a
+    /// queued upload (a copy an upload still needs is never deleted).
+    public func pruneAttachmentFiles(jobId: UUID) {
+        guard let j = job(id: jobId) else { return }
+        var keep = Set((j.attachments ?? []).map(\.id))
+        keep.formUnion((j.submittedAttachments ?? []).map(\.id))
+        keep.formUnion((j.fileUpdate?.files ?? []).map(\.id))
+        keep.formUnion((j.replacement?.files ?? []).map(\.id))
+        let dir = attachmentsDir.appendingPathComponent(jobId.uuidString, isDirectory: true)
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        for name in items {
+            guard let id = UUID(uuidString: name), !keep.contains(id) else { continue }
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name, isDirectory: true))
+        }
     }
 
     /// A new submission id for a job whose prepared upload is discarded.
@@ -488,13 +522,13 @@ public final class LibraryStore: @unchecked Sendable {
 
     /// After a file change: a prepared (frozen) upload is discarded and a new submission id is
     /// used, because the website treats the same id with different files as a conflict.
-    static func filesChanged(_ j: inout Job, uploadsChanged: Bool, newSubmissionId: String?) {
+    static func filesChanged(_ j: inout Job, uploadsChanged: Bool, contextChanged: Bool, newSubmissionId: String?) {
         if uploadsChanged, j.stage != .submitted, j.submissionPayload != nil {
             j.submissionPayload = nil
             j.submittedAttachments = nil
             if let id = newSubmissionId { j.submissionId = id }
         }
-        if j.notes != nil { j.filesChangedSinceNotes = true }
+        if contextChanged, j.notes != nil { j.filesChangedSinceNotes = true }
     }
 
     /// The stored bytes, checked against the SHA-256 recorded when the file was added.

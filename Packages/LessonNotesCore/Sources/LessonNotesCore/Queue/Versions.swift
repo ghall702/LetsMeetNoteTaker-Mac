@@ -71,6 +71,8 @@ public struct PendingReplacement: Codable, Equatable, Sendable {
     public var conflictChangedBy: String?
     public var conflictUpdatedAt: String?
     public var createdAt: Date
+    /// When set, the replacement is a multipart PATCH that also replaces the note's files with these.
+    public var files: [LessonAttachment]?
 
     public init(versionId: UUID, updateId: String, baseVersion: Int?, createdAt: Date) {
         self.versionId = versionId
@@ -114,4 +116,31 @@ extension Job {
     public var draftVersions: [NoteVersion] { allNoteVersions.filter { $0.state == .draft } }
 
     mutating func materialiseVersions() { noteVersions = allNoteVersions }
+}
+
+
+/// A queued `PUT /notes/{id}/files` (swap files only; approval status unchanged).
+public struct PendingFileUpdate: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable { case queued, failed, noteDeleted }
+    public var updateId: String
+    /// The exact set sent (frozen, so retries reuse the same `update_id` and files).
+    public var files: [LessonAttachment]
+    public var state: State
+    public var attempts: Int
+    public var nextAttemptAt: Date?
+    public var firstRetryAt: Date?
+    public var message: String?
+    public var createdAt: Date
+
+    public init(files: [LessonAttachment], createdAt: Date, updateId: String? = nil) {
+        self.files = files
+        self.updateId = updateId ?? Self.makeUpdateId(now: createdAt)
+        self.state = .queued
+        self.attempts = 0
+        self.createdAt = createdAt
+    }
+
+    public static func makeUpdateId(now: Date = Date()) -> String {
+        "mac-files-" + PendingReplacement.makeUpdateId(now: now).dropFirst("mac-replace-".count)
+    }
 }

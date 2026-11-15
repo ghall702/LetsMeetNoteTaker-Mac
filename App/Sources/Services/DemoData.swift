@@ -98,11 +98,11 @@ enum DemoData {
             store.addLesson(l)
             // Sample lesson files: two uploaded with the note, one added later as context only.
             var files: [LessonAttachment] = []
-            for (name, role, include, ctxOnly) in [("Fractions slides.pdf", AttachmentRole.slides, true, false),
+            for (name, role, include, ctxOnly) in [("macOS Preview Fractions slides.pdf", AttachmentRole.slides, true, false),
                                                    ("Ellie's worksheet.jpg", AttachmentRole.studentWork, true, false),
-                                                   ("Model answers.docx", AttachmentRole.exemplar, false, true)] {
+                                                   ("Model answers.docx", AttachmentRole.exemplar, true, true), ("New worksheet.png", AttachmentRole.studentWork, true, false)] {
                 let a = LessonAttachment(filename: name, byteCount: 180_000 + name.count * 1000, sha256: "demo", role: role,
-                                         includeInContext: include, contextOnly: ctxOnly, addedAt: now)
+                                         includeInContext: include, shareWithPupil: !ctxOnly, addedAt: now)
                 let u = store.attachmentURL(jobId: l.jobs[0].id, a)
                 try? FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? Data("demo".utf8).write(to: u)
@@ -110,7 +110,9 @@ enum DemoData {
             }
             store.updateJob(id: l.jobs[0].id) {
                 $0.attachments = files
-                $0.submittedAttachments = files.filter { !$0.contextOnly }
+                let onWebsite = files.filter { $0.shareWithPupil && $0.filename != "New worksheet.png" }
+                $0.submittedAttachments = onWebsite
+                $0.remoteFiles = onWebsite.map { RemoteFile(filename: $0.filename, size: $0.byteCount) }
                 $0.filesChangedSinceNotes = true
             }
             try? store.saveTranscript(StoredTranscript(jobId: l.jobs[0].id, savedAt: now, model: "whisperkit/openai_whisper-large-v3-v20240930_turbo", language: "en",

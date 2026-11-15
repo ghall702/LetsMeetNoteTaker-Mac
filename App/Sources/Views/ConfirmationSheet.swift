@@ -119,18 +119,18 @@ struct ConfirmationSheet: View {
                 Section {
                     ForEach($files) { $f in
                         AttachmentRowView(filename: f.filename, byteCount: f.byteCount, role: $f.role, includeInContext: $f.includeInContext,
-                                          onRemove: { files.removeAll { $0.id == f.id } })
+                                          shareWithPupil: $f.shareWithPupil, onRemove: { files.removeAll { $0.id == f.id } })
                     }
                     HStack {
                         Button("Add Files…") { addFiles(AttachmentPicker.choose()) }
-                            .disabled(files.count >= AttachmentRules.maxFiles)
+                            .disabled(files.count >= LibraryStore.maxStoredFiles)
                         if let fileError { Text(fileError).font(.caption).foregroundStyle(.red) }
                     }
                     Color.clear.frame(height: 1).id("lesson-files")
                 } header: {
                     Text("Lesson files (optional)")
                 } footer: {
-                    Text("Slides, the pupil's work or your model answers. Files marked for AI context go to OpenAI with the transcript; all of them are uploaded so the pupil can download them once you approve the notes."
+                    Text("Slides, the pupil's work or your model answers. Files marked for AI context go to OpenAI with the transcript; files shared with the pupil (up to 5) are uploaded so they can download them once you approve the notes."
                          + (effectiveMode == .separate ? " With separate processing, the files are added to every part." : ""))
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -239,9 +239,9 @@ struct ConfirmationSheet: View {
         suggestions = MappingMatcher.rank(MatchContext(session: session), mappings: model.mappings, rooms: model.rooms)
         if DemoData.mode == "files" {
             let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            files = [PendingAttachment(url: tmp, filename: "Story Opening Planning Pro Forma 15-11-26 (1) — a very long file name for testing.pdf", byteCount: 563_000, role: .studentWork),
+            files = [PendingAttachment(url: tmp, filename: "macOS Preview Story Opening Planning Pro Forma 15-11-26 (1) — a very long file name for testing.pdf", byteCount: 563_000, role: .studentWork),
                      PendingAttachment(url: tmp, filename: "Lesson slides.pptx", byteCount: 2_400_000, role: .slides),
-                     PendingAttachment(url: tmp, filename: "Model answer.docx", byteCount: 41_000, role: .exemplar, includeInContext: false)]
+                     PendingAttachment(url: tmp, filename: "Model answer.docx", byteCount: 41_000, role: .exemplar, includeInContext: true, shareWithPupil: false)]
         }
         if let best = suggestions.first {
             studentId = best.mappingId.map { "m:\($0)" } ?? "r:\(best.roomId)"
@@ -271,8 +271,8 @@ struct ConfirmationSheet: View {
         fileError = nil
         var problems: [String] = []
         for u in urls {
-            guard files.count < AttachmentRules.maxFiles else { problems.append(AttachmentRules.Problem.tooMany.localizedDescription); break }
-            let name = AttachmentRules.sanitisedFilename(u.lastPathComponent)
+            guard files.count < LibraryStore.maxStoredFiles else { problems.append(AttachmentRules.Problem.tooMany.localizedDescription); break }
+            let name = AttachmentRules.storedFilename(u.lastPathComponent, pdfPreviewPrefix: model.settings.pdfPreviewPrefix)
             let size = AttachmentPicker.size(u)
             if let p = AttachmentRules.check(filename: name, byteCount: size) { problems.append(p.localizedDescription); continue }
             files.append(PendingAttachment(url: u, filename: name, byteCount: size))

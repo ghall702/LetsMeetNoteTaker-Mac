@@ -53,6 +53,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var openAIPaused: Bool = false
     /// While paused, still write notes for lessons dated today (in the app's time zone).
     public var openAIPauseAllowsToday: Bool = true
+    /// Name new PDF files "macOS Preview <name>.pdf".
+    public var pdfPreviewPrefix: Bool = true
 
     public init() {}
 
@@ -72,7 +74,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case websiteBaseURL, openAIModel, reasoningEffort, globalPrompt, transcriptionModel, transcriptionLanguage, zoomFolderPath,
              zoomFolderBookmark, watchFolder, autoProcessAfterConfirm, retention, timeZoneIdentifier,
              chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions, usage,
-             openAIPaused, openAIPauseAllowsToday
+             openAIPaused, openAIPauseAllowsToday, pdfPreviewPrefix
     }
 
     public init(from decoder: Decoder) throws {
@@ -100,5 +102,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         usage = (try? c.decodeIfPresent(UsageSettings.self, forKey: .usage)) ?? d.usage
         openAIPaused = try c.decodeIfPresent(Bool.self, forKey: .openAIPaused) ?? d.openAIPaused
         openAIPauseAllowsToday = try c.decodeIfPresent(Bool.self, forKey: .openAIPauseAllowsToday) ?? d.openAIPauseAllowsToday
+        pdfPreviewPrefix = try c.decodeIfPresent(Bool.self, forKey: .pdfPreviewPrefix) ?? d.pdfPreviewPrefix
     }
 }

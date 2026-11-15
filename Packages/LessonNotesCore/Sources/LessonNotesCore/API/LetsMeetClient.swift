@@ -193,6 +193,34 @@ public struct LetsMeetClient: Sendable {
     }
 
     /// `GET /notes/{id}`; a 404 means the note was deleted (or never existed).
+    /// Multipart `PATCH /notes/{id}`: new notes plus a full replacement set of files
+    /// (`body` must contain `"replace_files": true`). 0 files removes all attachments.
+    public func replace(noteId: String, body: Data, files: [UploadFile]) async throws -> NoteReplaceResponse {
+        let boundary = MultipartBody.makeBoundary()
+        let multipart = MultipartBody.build(noteJSON: body, files: files, boundary: boundary)
+        var r = makeRequest("notes/\(Self.safeId(noteId))", method: "PATCH", body: multipart)
+        r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        r.timeoutInterval = 600
+        return try await perform(r, as: NoteReplaceResponse.self).0
+    }
+
+    /// `PUT /notes/{id}/files`: replaces the note's files only — no version bump and no change
+    /// of approval status (a published note shows the new files straight away).
+    public func replaceFiles(noteId: String, updateId: String, files: [UploadFile]) async throws -> NoteFilesResponse {
+        let note = try JSONSerialization.data(withJSONObject: ["update_id": updateId], options: [.sortedKeys])
+        let boundary = MultipartBody.makeBoundary()
+        let multipart = MultipartBody.build(noteJSON: note, files: files, boundary: boundary)
+        var r = makeRequest("notes/\(Self.safeId(noteId))/files", method: "PUT", body: multipart)
+        r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        r.timeoutInterval = 600
+        return try await perform(r, okStatuses: [200, 201], as: NoteFilesResponse.self).0
+    }
+
+    static func safeId(_ id: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))
+        return id.addingPercentEncoding(withAllowedCharacters: allowed) ?? id
+    }
+
     public func status(of id: String) async throws -> NoteStatusResponse {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))
         let safe = id.addingPercentEncoding(withAllowedCharacters: allowed) ?? id

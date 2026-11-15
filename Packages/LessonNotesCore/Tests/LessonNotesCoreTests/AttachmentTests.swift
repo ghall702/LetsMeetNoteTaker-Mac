@@ -121,9 +121,9 @@ final class AttachmentTests: XCTestCase {
         try h.store.removeAttachment(jobId: jid, id: a.id)
         XCTAssertEqual(h.store.job(id: jid)?.attachments?.count, 4)
         XCTAssertFalse(FileManager.default.fileExists(atPath: h.store.attachmentURL(jobId: jid, a).path))
-        // Role can change any time; uploadable files are locked once the note is uploaded.
+        // Role can change any time; files are locked only while the note is being uploaded.
         let first = h.store.job(id: jid)!.attachments![0]
-        h.store.updateJob(id: jid) { $0.notes = GeneratedNotes(title: "T"); $0.stage = .submitted }
+        h.store.updateJob(id: jid) { $0.notes = GeneratedNotes(title: "T"); $0.stage = .submitting }
         h.store.setAttachmentRole(jobId: jid, id: first.id, role: .slides)
         XCTAssertEqual(h.store.job(id: jid)?.attachments?.first?.role, .slides)
         XCTAssertThrowsError(try h.store.addAttachment(from: src, toJob: jid)) { XCTAssertEqual($0 as? LibraryStore.AttachmentError, .notEditable) }
@@ -163,12 +163,12 @@ final class AttachmentTests: XCTestCase {
         let engine = h.engine()
         await engine.runUntilIdle()
         let ctx = try XCTUnwrap(h.notes.lastContext.value)
-        XCTAssertEqual(ctx.materials.map(\.filename), ["Slides.pdf", "pupil-answer.png", "model.txt"], "excluded file not sent to OpenAI")
+        XCTAssertEqual(ctx.materials.map(\.filename), ["macOS Preview Slides.pdf", "pupil-answer.png", "model.txt"], "excluded file not sent to OpenAI")
         XCTAssertFalse(ctx.header().contains("answers.txt"))
         XCTAssertEqual(ctx.materials[0].content, .pdf(base64: pdf.base64EncodedString()), "PDFs go to OpenAI as the PDF itself")
         XCTAssertEqual(ctx.materials[1].content, .image(mimeType: "image/png", base64: Data([0x89, 0x50, 0x4e, 0x47]).base64EncodedString()))
         XCTAssertEqual(ctx.materials[2].content, .text("Model paragraph", truncated: false))
-        XCTAssertTrue(ctx.header().contains("“Slides.pdf” — the tutor's lesson slides"))
+        XCTAssertTrue(ctx.header().contains("“macOS Preview Slides.pdf” — the tutor's lesson slides"))
         XCTAssertTrue(ctx.header().contains("“pupil-answer.png” — work produced by the pupil (student-produced"))
         XCTAssertTrue(ctx.header().contains("“model.txt” — exemplar modelling material written by the tutor"))
         XCTAssertNotNil(h.store.job(id: jid)?.submittedAttachments)
@@ -179,7 +179,7 @@ final class AttachmentTests: XCTestCase {
         let sent = h.submitter.files.value
         XCTAssertEqual(sent.count, 2)
         XCTAssertEqual(sent[0], sent[1], "retry sends the same files in the same order")
-        XCTAssertEqual(sent[0].map(\.filename), ["Slides.pdf", "pupil-answer.png", "model.txt", "answers.txt"], "excluded file still uploaded for the pupil")
+        XCTAssertEqual(sent[0].map(\.filename), ["macOS Preview Slides.pdf", "pupil-answer.png", "model.txt", "answers.txt"], "excluded file still uploaded for the pupil")
         XCTAssertEqual(sent[0].map(\.contentType), ["application/pdf", "image/png", "text/plain", "text/plain"])
         XCTAssertEqual(h.submitter.bodies.value[0], h.submitter.bodies.value[1])
         let body = try JSONSerialization.jsonObject(with: h.submitter.bodies.value[0]) as! [String: Any]

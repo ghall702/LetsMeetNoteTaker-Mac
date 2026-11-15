@@ -44,16 +44,15 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
     public var role: AttachmentRole
     /// When false the file is only uploaded for the pupil; OpenAI never sees it.
     public var includeInContext: Bool
-    /// Used only as OpenAI context, never uploaded (e.g. added after the note was uploaded,
-    /// because the website cannot add files to an existing note).
-    public var contextOnly: Bool
+    /// Whether the file is uploaded to LetsMeet for the pupil to download.
+    public var shareWithPupil: Bool
     public var addedAt: Date
 
     public init(id: UUID = UUID(), filename: String, byteCount: Int, sha256: String, role: AttachmentRole = .other,
-                includeInContext: Bool = true, contextOnly: Bool = false, addedAt: Date = Date()) {
+                includeInContext: Bool = true, shareWithPupil: Bool = true, addedAt: Date = Date()) {
         self.id = id
         self.includeInContext = includeInContext
-        self.contextOnly = contextOnly
+        self.shareWithPupil = shareWithPupil
         self.filename = filename
         self.byteCount = byteCount
         self.sha256 = sha256
@@ -61,7 +60,7 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
         self.addedAt = addedAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, filename, byteCount, sha256, role, includeInContext, contextOnly, addedAt }
+    enum CodingKeys: String, CodingKey { case id, filename, byteCount, sha256, role, includeInContext, shareWithPupil, contextOnly, addedAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -70,8 +69,21 @@ public struct LessonAttachment: Codable, Sendable, Equatable, Identifiable {
         sha256 = try c.decode(String.self, forKey: .sha256)
         role = (try? c.decodeIfPresent(AttachmentRole.self, forKey: .role)) ?? .other
         includeInContext = try c.decodeIfPresent(Bool.self, forKey: .includeInContext) ?? true
-        contextOnly = try c.decodeIfPresent(Bool.self, forKey: .contextOnly) ?? false
+        if let share = try c.decodeIfPresent(Bool.self, forKey: .shareWithPupil) { shareWithPupil = share }
+        else { shareWithPupil = !(try c.decodeIfPresent(Bool.self, forKey: .contextOnly) ?? false) }
         addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date(timeIntervalSince1970: 0)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(filename, forKey: .filename)
+        try c.encode(byteCount, forKey: .byteCount)
+        try c.encode(sha256, forKey: .sha256)
+        try c.encode(role, forKey: .role)
+        try c.encode(includeInContext, forKey: .includeInContext)
+        try c.encode(shareWithPupil, forKey: .shareWithPupil)
+        try c.encode(addedAt, forKey: .addedAt)
     }
 
     public var fileExtension: String { (filename as NSString).pathExtension.lowercased() }
@@ -144,6 +156,18 @@ public enum AttachmentRules {
         return s
     }
 
+    /// PDFs are named "macOS Preview <name>.pdf" (George's convention); other types keep their name.
+    public static let pdfPrefix = "macOS Preview "
+
+    /// The name a newly added file is stored and uploaded under.
+    public static func storedFilename(_ raw: String, pdfPreviewPrefix: Bool = true) -> String {
+        var name = sanitisedFilename(raw)
+        if pdfPreviewPrefix && (name as NSString).pathExtension.lowercased() == "pdf" && !name.hasPrefix(pdfPrefix) {
+            name = sanitisedFilename(pdfPrefix + name)
+        }
+        return name
+    }
+
     /// Checks one file before it is added.
     public static func check(filename: String, byteCount: Int) -> Problem? {
         let ext = (filename as NSString).pathExtension.lowercased()
@@ -162,6 +186,13 @@ public enum AttachmentRules {
         if total > maxRequestBytes { return .requestTooLarge(total) }
         return nil
     }
+}
+
+/// A file as LetsMeet reports it (`files` in note responses).
+public struct RemoteFile: Codable, Sendable, Equatable, Hashable {
+    public var filename: String
+    public var size: Int?
+    public init(filename: String, size: Int?) { self.filename = filename; self.size = size }
 }
 
 /// A file part for a multipart `POST /notes`.

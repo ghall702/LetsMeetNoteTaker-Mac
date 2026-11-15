@@ -173,16 +173,19 @@ public struct NoteStatusResponse: Codable, Sendable, Equatable {
     public var version: Int?
     /// Lesson length (seconds) as stored on the website.
     public var lessonLength: Int?
+    /// Files on LetsMeet (nil when the response does not list them).
+    public var files: [RemoteFile]?
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id", submissionId = "submission_id", roomId = "room_id", status, createdAt = "created_at",
-             updatedAt = "updated_at", publishedAt = "published_at", replayed, version, lessonLength = "lesson_length"
+             updatedAt = "updated_at", publishedAt = "published_at", replayed, version, lessonLength = "lesson_length", files
     }
 
     public init(noteId: String?, submissionId: String, roomId: String? = nil, status: NoteStatus, createdAt: String? = nil,
-                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil, version: Int? = nil, lessonLength: Int? = nil) {
+                updatedAt: String? = nil, publishedAt: String? = nil, replayed: Bool? = nil, version: Int? = nil, lessonLength: Int? = nil, files: [RemoteFile]? = nil) {
         self.version = version
         self.lessonLength = lessonLength
+        self.files = files
         self.noteId = noteId
         self.submissionId = submissionId
         self.roomId = roomId
@@ -226,9 +229,11 @@ public struct NoteReplacement: Codable, Sendable, Equatable {
     /// `nil` clears the private notes on the website.
     public var privateNotes: String?
     public var generator: ReplacementGenerator
+    /// Multipart PATCH only: the attached `file_uploads` replace every file on the note.
+    public var replaceFiles: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
-        case updateId = "update_id", baseVersion = "base_version", title, summary, privateNotes = "private_notes", generator
+        case updateId = "update_id", baseVersion = "base_version", title, summary, privateNotes = "private_notes", generator, replaceFiles = "replace_files"
     }
 
     public init(updateId: String, baseVersion: Int, title: String, summary: NoteSummary, privateNotes: String?, generator: ReplacementGenerator) {
@@ -248,6 +253,7 @@ public struct NoteReplacement: Codable, Sendable, Equatable {
         try c.encode(summary, forKey: .summary)
         if let privateNotes { try c.encode(privateNotes, forKey: .privateNotes) } else { try c.encodeNil(forKey: .privateNotes) }
         try c.encode(generator, forKey: .generator)
+        if replaceFiles == true { try c.encode(true, forKey: .replaceFiles) }
     }
 
     public func jsonData() throws -> Data { try JSONCoding.encoder().encode(self) }
@@ -271,14 +277,16 @@ public struct NoteReplaceResponse: Codable, Sendable, Equatable {
     public var previousStatus: NoteStatus?
     public var replayed: Bool?
     public var lessonLength: Int? = nil
+    public var files: [RemoteFile]? = nil
 
     enum CodingKeys: String, CodingKey {
         case noteId = "note_id", submissionId = "submission_id", status, version, updatedAt = "updated_at", publishedAt = "published_at",
-             fieldsChanged = "fields_changed", previousStatus = "previous_status", replayed, lessonLength = "lesson_length"
+             fieldsChanged = "fields_changed", previousStatus = "previous_status", replayed, lessonLength = "lesson_length", files
     }
 
     public init(noteId: String?, submissionId: String?, status: NoteStatus, version: Int?, updatedAt: String? = nil, publishedAt: String? = nil,
-                fieldsChanged: [String]? = nil, previousStatus: NoteStatus? = nil, replayed: Bool? = nil) {
+                fieldsChanged: [String]? = nil, previousStatus: NoteStatus? = nil, replayed: Bool? = nil, files: [RemoteFile]? = nil) {
+        self.files = files
         self.noteId = noteId
         self.submissionId = submissionId
         self.status = status
@@ -329,5 +337,19 @@ public struct LessonLengthResponse: Codable, Sendable, Equatable {
         self.status = status
         self.lessonLength = lessonLength
         self.unchanged = unchanged
+    }
+}
+
+
+/// Response of `PUT /notes/{id}/files` (fields decoded leniently).
+public struct NoteFilesResponse: Codable, Sendable, Equatable {
+    public var noteId: String?
+    public var submissionId: String?
+    public var status: NoteStatus?
+    public var version: Int?
+    public var files: [RemoteFile]?
+    enum CodingKeys: String, CodingKey { case noteId = "note_id", submissionId = "submission_id", status, version, files }
+    public init(noteId: String? = nil, submissionId: String? = nil, status: NoteStatus? = nil, version: Int? = nil, files: [RemoteFile]? = nil) {
+        self.noteId = noteId; self.submissionId = submissionId; self.status = status; self.version = version; self.files = files
     }
 }

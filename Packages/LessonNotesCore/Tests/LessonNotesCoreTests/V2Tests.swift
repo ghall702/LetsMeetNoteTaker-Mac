@@ -47,6 +47,23 @@ final class MockReplacer: NoteReplacing, @unchecked Sendable {
         case .failure(let e): throw e
         }
     }
+    let fileSets = Box<[[UploadFile]]>([])
+    let fileUpdateIds = Box<[String]>([])
+    var filesResults: [Result<NoteFilesResponse, Error>] = []
+    func replace(noteId: String, body: Data, files: [UploadFile]) async throws -> NoteReplaceResponse {
+        fileSets.mutate { $0.append(files) }
+        return try await replace(noteId: noteId, body: body)
+    }
+    func replaceFiles(noteId: String, updateId: String, files: [UploadFile]) async throws -> NoteFilesResponse {
+        let n = fileUpdateIds.value.count
+        ids.mutate { $0.append(noteId) }
+        fileUpdateIds.mutate { $0.append(updateId) }
+        fileSets.mutate { $0.append(files) }
+        if !filesResults.isEmpty {
+            switch filesResults[min(n, filesResults.count - 1)] { case .success(let r): return r; case .failure(let e): throw e }
+        }
+        return NoteFilesResponse(noteId: noteId, status: .published, version: 2, files: files.map { RemoteFile(filename: $0.filename, size: $0.data.count) })
+    }
     func status(of id: String) async throws -> NoteStatusResponse {
         NoteStatusResponse(noteId: id, submissionId: id, status: statusResult, version: statusVersion)
     }

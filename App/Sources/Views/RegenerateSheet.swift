@@ -90,7 +90,7 @@ struct RegenerateSheet: View {
                     } header: {
                         Text("Lesson files used as context")
                     } footer: {
-                        Text("Tick or untick files, change what they are, or add a context-only file. These choices are saved and used for this regeneration.")
+                        Text("Tick or untick files for AI context or sharing, change what they are, or add files. These choices are saved. If the shared files differ from LetsMeet, accepting the new notes also replaces the files there.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

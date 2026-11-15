@@ -343,7 +343,8 @@ final class AppModel: ObservableObject {
     var allJobs: [LessonJob] { lessons.flatMap { l in l.jobs.map { LessonJob(lesson: l, job: $0) } } }
     var activeJobs: [LessonJob] { allJobs.filter { $0.job.stage.isActive }.sorted { $0.job.createdAt < $1.job.createdAt } }
     var attentionJobs: [LessonJob] {
-        allJobs.filter { $0.job.stage == .failed || ($0.job.replacement.map { $0.state != .queued } ?? false) }
+        allJobs.filter { $0.job.stage == .failed || ($0.job.replacement.map { $0.state != .queued } ?? false)
+            || ($0.job.fileUpdate.map { $0.state != .queued } ?? false) }
     }
     var heldJobs: [LessonJob] { allJobs.filter { $0.job.stage == .held } }
     var isBusy: Bool { !activeJobs.isEmpty }
@@ -564,8 +565,7 @@ final class AppModel: ObservableObject {
             var failures: [String] = []
             for f in files {
                 for id in jobIds {
-                    do { let a = try store.addAttachment(from: f.url, toJob: id, role: f.role)
-                         if !f.includeInContext { store.setAttachmentIncluded(jobId: id, id: a.id, included: false) } }
+                    do { try store.addAttachment(from: f.url, toJob: id, role: f.role, shareWithPupil: f.shareWithPupil, includeInContext: f.includeInContext) }
                     catch { failures.append(error.localizedDescription); break }
                 }
             }
@@ -573,14 +573,14 @@ final class AppModel: ObservableObject {
         }.value
     }
 
-    func addFiles(_ urls: [URL], to job: Job, contextOnly: Bool = false) {
+    func addFiles(_ urls: [URL], to job: Job) {
         guard !urls.isEmpty else { return }
         let store = self.store
         Task {
             let failures = await Task.detached(priority: .userInitiated) { () -> [String] in
                 var out: [String] = []
                 for u in urls {
-                    do { try store.addAttachment(from: u, toJob: job.id, contextOnly: contextOnly) } catch { out.append(error.localizedDescription) }
+                    do { try store.addAttachment(from: u, toJob: job.id, shareWithPupil: (store.job(id: job.id)?.uploadAttachments.count ?? 0) < AttachmentRules.maxFiles) } catch { out.append(error.localizedDescription) }
                 }
                 return out
             }.value
@@ -588,20 +588,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// New held lesson from the saved transcript with copies of the files (see RedoFromTranscript).
-    func redoWithDifferentFiles(_ job: Job) {
-        let store = self.store
-        Task {
-            do {
-                let l = try await Task.detached(priority: .userInitiated) { try RedoFromTranscript.make(store: store, jobId: job.id) }.value
-                reload()
-                sidebar = .history
-                selectedLessonId = l.id
-                banner = "New lesson created from the saved transcript. Change its files, then press Start. Remember to delete or reject the old note in Admin Tools once the new one is approved."
-            } catch {
-                banner = error.localizedDescription
-            }
-        }
+    func setAttachmentShared(job: Job, id: UUID, shared: Bool) {
+        do { try store.setAttachmentShared(jobId: job.id, id: id, shared: shared) } catch { banner = error.localizedDescription }
+    }
+
+    /// "Update Files on LetsMeet": replaces the uploaded note's files only (no re-approval).
+    func updateFilesOnWebsite(_ job: Job) {
+        do { try store.queueFileUpdate(jobId: job.id); Task { await engine.tick() } } catch { banner = error.localizedDescription }
+    }
+
+    func retryFileUpdate(_ job: Job) { updateFilesOnWebsite(job) }
+
+    func discardFileUpdate(_ job: Job) {
+        store.updateJob(id: job.id) { $0.fileUpdate = nil }
+        store.pruneAttachmentFiles(jobId: job.id)
     }
 
     func removeAttachment(job: Job, id: UUID) {

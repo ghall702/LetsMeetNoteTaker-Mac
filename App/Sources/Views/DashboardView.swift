@@ -170,7 +170,7 @@ struct DashboardView: View {
                         Spacer()
                         StatusChip(job: j)
                     }
-                    Text(j.error?.message ?? j.replacement?.message ?? "Needs attention").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(j.error?.message ?? j.replacement?.message ?? j.fileUpdate?.message ?? "Needs attention").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                     HStack {
                         Button("Open") { model.openLesson(l.id) }
                         if j.error?.kind == .openAICredits { Link("Add Credits…", destination: JobError.openAIBillingURL) }

@@ -111,8 +111,14 @@ public enum NotesRegeneration {
                 for i in j.noteVersions!.indices where j.noteVersions![i].state == .uploading { j.noteVersions![i].state = .discarded }
                 if let i = j.noteVersions!.firstIndex(where: { $0.id == versionId }) { j.noteVersions![i].state = .uploading }
                 j.filesChangedSinceNotes = nil
-                j.replacement = PendingReplacement(versionId: versionId, updateId: PendingReplacement.makeUpdateId(now: now),
-                                                   baseVersion: draft.baseVersion ?? j.remoteVersion, createdAt: now)
+                var rep = PendingReplacement(versionId: versionId, updateId: PendingReplacement.makeUpdateId(now: now),
+                                             baseVersion: draft.baseVersion ?? j.remoteVersion, createdAt: now)
+                // Shared files changed since upload: replace them in the same request (replace_files).
+                if j.uploadAttachments.map(\.id) != (j.submittedAttachments ?? []).map(\.id) {
+                    rep.files = j.uploadAttachments
+                    j.fileUpdate = nil // superseded: the files go with the notes
+                }
+                j.replacement = rep
             }
             return .replacementQueued
         }
@@ -216,61 +222,5 @@ public enum NotesRegeneration {
             j.remoteStatus = .deleted
         }
         return store.lesson(id: newLesson.id) ?? newLesson
-    }
-}
-
-/// "Redo with Different Files": a new note for the same recording, made from the saved
-/// transcript (no re-transcription), with its own copy of the files so they can be swapped.
-/// It is created held, so files can be changed before it runs, and it is submitted as a NEW
-/// note (new submission id) — the website cannot change the files of an uploaded note.
-public enum RedoFromTranscript {
-    public enum RedoError: Error, LocalizedError, Equatable {
-        case notFound, transcriptMissing
-        public var errorDescription: String? {
-            switch self {
-            case .notFound: return "This lesson could not be found."
-            case .transcriptMissing: return "The saved transcript for this lesson is no longer on this Mac, so it can't be redone without transcribing again."
-            }
-        }
-    }
-
-    @discardableResult
-    public static func make(store: LibraryStore, jobId: UUID, now: Date = Date()) throws -> Lesson {
-        guard let lesson = store.lesson(containingJob: jobId), let job = lesson.jobs.first(where: { $0.id == jobId }) else { throw RedoError.notFound }
-        guard store.transcriptState(jobId: jobId) == .valid, let transcript = store.transcript(jobId: jobId) else { throw RedoError.transcriptMissing }
-        let old = lesson.recordings(for: job)
-        var idMap: [UUID: UUID] = [:]
-        let recs = old.enumerated().map { i, r -> RecordingRef in
-            var c = r; c.id = UUID(); c.order = i; idMap[r.id] = c.id; return c
-        }
-        let c = LessonConfirmation(roomId: lesson.roomId, roomName: lesson.roomName, studentId: lesson.studentId, pupilName: lesson.pupilName,
-                                   lessonDate: lesson.lessonDate, startedAt: recs.first?.recordedAt ?? lesson.startedAt,
-                                   dateSource: lesson.dateSource, mode: recs.count == 1 ? .single : .combined,
-                                   meetingTopic: lesson.meetingTopic, sourceFolder: lesson.sourceFolder, recordings: recs)
-        var new = try LessonFactory.make(c, settings: store.settings, held: true, now: now, reprocessOf: lesson.id)
-        let newJobId = new.jobs[0].id
-        var t = transcript
-        t.jobId = newJobId
-        for i in t.parts.indices { if let n = idMap[t.parts[i].recordingId] { t.parts[i].recordingId = n } }
-        new.jobs[0].hasTranscript = true
-        new.jobs[0].transcriptionModel = job.transcriptionModel
-        new.jobs[0].completedStagesAt["transcribed"] = now
-        new.jobs[0].statusMessage = "Transcript reused. Change the files if needed, then press Start."
-        try store.saveTranscript(t)
-        store.addLesson(new)
-        // Copy the files (uploaded ones and context-only ones become normal files here, up to the limit).
-        var copied: [LessonAttachment] = []
-        for a in job.attachments ?? job.submittedAttachments ?? [] {
-            guard let data = try? store.attachmentData(jobId: jobId, a) else { continue }
-            var b = a
-            b.id = UUID()
-            b.addedAt = now
-            b.contextOnly = copied.filter { !$0.contextOnly }.count >= AttachmentRules.maxFiles
-            let url = store.attachmentURL(jobId: newJobId, b)
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if (try? data.write(to: url, options: [.atomic])) != nil { copied.append(b) }
-        }
-        if !copied.isEmpty { store.updateJob(id: newJobId, now: now) { $0.attachments = copied } }
-        return store.lesson(containingJob: newJobId) ?? new
     }
 }

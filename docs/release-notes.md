@@ -9,10 +9,14 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.7
-- **Swap files before upload:** files can be added, removed or swapped until the note is uploaded — also after the notes are written, whenever the lesson isn't running (held, needs attention or cancelled). A prepared upload is discarded and a new submission ID used, so the website never sees conflicting files.
-- **Regenerate with different context:** the Regenerate Notes sheet lists the lesson's files — tick or untick each one for AI context, change what it is, or add a **context-only** file (used by OpenAI, not uploaded). History flags notes whose files or AI settings have changed since they were written, with a Regenerate button.
-- **Redo with Different Files** (uploaded notes): LetsMeet can't change the files of an uploaded note, so this makes a new lesson from the saved transcript (no re-transcription) with copies of the files. It waits for you to swap files and press Start, then uploads as a new note — delete or reject the old note in Admin Tools.
+### What's in 1.8
+- **Change the files on an uploaded note** — no new note needed:
+  - **Update Files on LetsMeet** swaps the note's downloadable files only. The notes and their approval are unchanged, so a published note shows the new files straight away.
+  - **Regenerate Notes** with changed files: accepting the new notes also replaces the files in the same update, and the note returns to Waiting for approval.
+- **Share with pupil** switch on every file, next to **Include in AI context** — e.g. give OpenAI your model answers without sharing them.
+- Files can be added, removed or swapped whenever the lesson isn't mid-upload. Changes to an uploaded note stay on this Mac until you send them. History shows the files currently on LetsMeet.
+- The Regenerate Notes sheet lists the lesson's files so you can change what OpenAI sees for that regeneration.
+- **PDF names:** new PDFs are named “macOS Preview <name>.pdf” (Settings → General → Lesson files to turn off).
 
 ### Also in 1.6
 - **Lesson files:** attach up to 5 files to a lesson (PDF, Word, PowerPoint, Excel, text, CSV or images; up to 20 MB each) in the Confirm sheet or in History until the notes are written. They are uploaded with the note and pupils can download them once you approve it.

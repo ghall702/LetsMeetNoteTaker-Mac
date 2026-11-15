@@ -175,19 +175,31 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     /// Files written into the notes no longer match the files/AI settings (regenerate to use them).
     public var filesChangedSinceNotes: Bool?
 
-    /// Uploadable files can be swapped until the note is uploaded: freely before notes are
-    /// written, and afterwards whenever the job is not running (held, failed or cancelled).
-    /// Changing them discards a prepared upload and uses a new submission id.
+    /// Files as LetsMeet last reported them.
+    public var remoteFiles: [RemoteFile]?
+    /// A queued "update files only" request for an uploaded note.
+    public var fileUpdate: PendingFileUpdate?
+
+    /// Files can be changed whenever the lesson isn't mid-upload. Before upload, a change
+    /// discards a prepared upload (new submission id). After upload, the change stays on this
+    /// Mac until George sends it (Update Files, or with regenerated notes).
     public var attachmentsEditable: Bool {
         switch stage {
-        case .submitted, .submitting: return false
-        case .held, .failed, .cancelled: return true
+        case .submitting: return false
+        case .held, .failed, .cancelled, .submitted: return true
         default: return notes == nil && submissionPayload == nil
         }
     }
 
     /// Files that go to the website with the note.
-    public var uploadAttachments: [LessonAttachment] { (attachments ?? []).filter { !$0.contextOnly } }
+    public var uploadAttachments: [LessonAttachment] { (attachments ?? []).filter(\.shareWithPupil) }
+
+    /// Uploaded note whose shared files differ from those on LetsMeet, with nothing queued to fix it.
+    public var websiteFilesOutOfDate: Bool {
+        guard stage == .submitted, remoteStatus != .deleted else { return false }
+        if fileUpdate?.state == .queued || (replacement?.files != nil && replacement?.state == .queued) { return false }
+        return uploadAttachments.map(\.id) != (submittedAttachments ?? []).map(\.id)
+    }
 
     public init(id: UUID = UUID(), submissionId: String, partLetter: String, recordingIds: [UUID], stage: JobStage = .queued,
                 createdAt: Date = Date()) {

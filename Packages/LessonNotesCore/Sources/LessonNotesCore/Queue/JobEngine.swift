@@ -59,6 +59,16 @@ extension LetsMeetClient: NoteSubmitting {}
 public protocol NoteReplacing: Sendable {
     func replace(noteId: String, body: Data) async throws -> NoteReplaceResponse
     func status(of id: String) async throws -> NoteStatusResponse
+    /// Multipart PATCH: notes plus a full replacement set of files.
+    func replace(noteId: String, body: Data, files: [UploadFile]) async throws -> NoteReplaceResponse
+    /// `PUT /notes/{id}/files`: files only.
+    func replaceFiles(noteId: String, updateId: String, files: [UploadFile]) async throws -> NoteFilesResponse
+}
+
+public enum FileReplaceUnsupported: Error { case unsupported }
+extension NoteReplacing {
+    public func replace(noteId: String, body: Data, files: [UploadFile]) async throws -> NoteReplaceResponse { throw FileReplaceUnsupported.unsupported }
+    public func replaceFiles(noteId: String, updateId: String, files: [UploadFile]) async throws -> NoteFilesResponse { throw FileReplaceUnsupported.unsupported }
 }
 
 extension LetsMeetClient: NoteReplacing {}
@@ -308,6 +318,21 @@ public actor JobEngine {
                 networkJobs.insert(id)
                 running[id] = Task { [weak self] in
                     await self?.processReplacement(jobId: id)
+                    await self?.finished(jobId: id)
+                }
+            }
+        }
+        // Queued "update files only" requests (after any queued notes replacement for that note).
+        if online, deps.makeReplacer != nil {
+            let due = store.allLessons.flatMap(\.jobs).filter { j in
+                guard let f = j.fileUpdate, f.state == .queued, running[j.id] == nil, j.replacement?.state != .queued else { return false }
+                return (f.nextAttemptAt ?? .distantPast) <= t
+            }
+            for job in due where networkJobs.count < networkLimit + 2 {
+                let id = job.id
+                networkJobs.insert(id)
+                running[id] = Task { [weak self] in
+                    await self?.processFileUpdate(jobId: id)
                     await self?.finished(jobId: id)
                 }
             }
@@ -652,6 +677,7 @@ public actor JobEngine {
             $0.remoteStatus = response.status
             $0.remoteVersion = response.version ?? $0.remoteVersion
             if let len = response.lessonLength { $0.lessonLengthSynced = len }
+            $0.remoteFiles = response.files ?? frozenFiles.map { RemoteFile(filename: $0.filename, size: $0.byteCount) }
             $0.replayed = response.replayed
             $0.remoteUpdatedAt = response.updatedAt
             $0.submittedAt = now()
@@ -764,9 +790,16 @@ extension JobEngine {
                     rep.baseVersion = v
                 }
                 let n = NotesSchema.sanitise(version.notes)
-                let body = NoteReplacement(updateId: rep.updateId, baseVersion: rep.baseVersion!, title: n.title, summary: NotesSchema.summary(from: n),
+                var body = NoteReplacement(updateId: rep.updateId, baseVersion: rep.baseVersion!, title: n.title, summary: NotesSchema.summary(from: n),
                                            privateNotes: n.privateNotes.isEmpty ? nil : n.privateNotes,
                                            generator: ReplacementGenerator(appVersion: String(deps.appVersion.prefix(100)), summaryModel: String(version.model.prefix(100))))
+                if let files = rep.files {
+                    if let p = AttachmentRules.check(files, noteJSONBytes: 6_000_000) {
+                        markReplacement(jobId, state: .failed, message: p.localizedDescription)
+                        return
+                    }
+                    body.replaceFiles = true
+                }
                 let issues = SubmissionValidator.validate(body)
                 if !issues.isEmpty {
                     markReplacement(jobId, state: .failed, message: "The new notes could not be validated: " + issues.map(\.description).joined(separator: "; "))
@@ -776,10 +809,20 @@ extension JobEngine {
                 let frozen = rep
                 store.updateJob(id: jobId, now: now()) { $0.replacement = frozen }
             }
-            emit(.progress(jobId: jobId, fraction: 0.5, message: "Replacing notes on the website"))
+            emit(.progress(jobId: jobId, fraction: 0.5, message: rep.files == nil ? "Replacing notes on the website" : "Replacing notes and files on the website"))
             store.flush()
-            let resp = try await replacer.replace(noteId: noteRef, body: rep.body!)
-            completeReplacement(jobId, version: version, response: resp)
+            let resp: NoteReplaceResponse
+            if let files = rep.files {
+                var uploads: [UploadFile] = []
+                for a in files {
+                    do { uploads.append(UploadFile(filename: a.filename, contentType: a.contentType, data: try store.attachmentData(jobId: jobId, a))) }
+                    catch { markReplacement(jobId, state: .failed, message: error.localizedDescription); return }
+                }
+                resp = try await replacer.replace(noteId: noteRef, body: rep.body!, files: uploads)
+            } else {
+                resp = try await replacer.replace(noteId: noteRef, body: rep.body!)
+            }
+            completeReplacement(jobId, version: version, response: resp, files: rep.files)
         } catch let e as LetsMeetAPIError {
             switch (e.httpStatus, e.code) {
             case (409, "version_conflict"):
@@ -804,7 +847,7 @@ extension JobEngine {
                 store.updateJob(id: jobId, now: now()) { $0.remoteStatus = .deleted }
                 markReplacement(jobId, state: .noteDeleted, message: "This note has been deleted on the website. You can submit these notes as a new note.")
             case (422, "no_changes"):
-                completeReplacement(jobId, version: version, response: nil)
+                completeReplacement(jobId, version: version, response: nil, files: rep.files)
             default:
                 if e.isRetryable { scheduleReplacementRetry(jobId, message: e.message, retryAfter: e.retryAfter) }
                 else { markReplacement(jobId, state: .failed, message: e.localizedDescription) }
@@ -820,6 +863,86 @@ extension JobEngine {
             case .fatal(let je):
                 markReplacement(jobId, state: .failed, message: je.message)
             }
+        }
+    }
+
+    /// Sends a queued "update files only" (`PUT /notes/{id}/files`): no version bump and no
+    /// change of approval status. The same `update_id` and files are reused on every retry.
+    func processFileUpdate(jobId: UUID) async {
+        guard let job = store.job(id: jobId), let fu = job.fileUpdate, fu.state == .queued else { return }
+        let noteRef = job.noteId ?? job.submissionId
+        func mark(_ state: PendingFileUpdate.State, _ message: String) {
+            store.updateJob(id: jobId, now: now()) { $0.fileUpdate?.state = state; $0.fileUpdate?.message = message; $0.fileUpdate?.nextAttemptAt = nil }
+            emit(.replacementNeedsAttention(jobId: jobId, message: message))
+        }
+        var uploads: [UploadFile] = []
+        for a in fu.files {
+            do { uploads.append(UploadFile(filename: a.filename, contentType: a.contentType, data: try store.attachmentData(jobId: jobId, a))) }
+            catch { mark(.failed, error.localizedDescription); return }
+        }
+        do {
+            guard let makeReplacer = deps.makeReplacer else { throw LetsMeetClientError.missingKey }
+            let replacer = try makeReplacer()
+            emit(.progress(jobId: jobId, fraction: 0.5, message: "Updating files on the website"))
+            store.updateJob(id: jobId, now: now()) { $0.fileUpdate?.message = "Updating files on LetsMeet…" }
+            let resp = try await replacer.replaceFiles(noteId: noteRef, updateId: fu.updateId, files: uploads)
+            store.updateJob(id: jobId, now: now()) { j in
+                j.submittedAttachments = fu.files
+                j.remoteFiles = resp.files ?? fu.files.map { RemoteFile(filename: $0.filename, size: $0.byteCount) }
+                if let st = resp.status { j.remoteStatus = st }
+                if let v = resp.version { j.remoteVersion = v }
+                j.remoteCheckedAt = now()
+                j.fileUpdate = nil
+            }
+            store.pruneAttachmentFiles(jobId: jobId)
+            emit(.idle)
+        } catch let e as LetsMeetAPIError {
+            switch (e.httpStatus, e.code) {
+            case (404, _):
+                store.updateJob(id: jobId, now: now()) { $0.remoteStatus = .deleted }
+                mark(.noteDeleted, "This note has been deleted on LetsMeet.")
+            case (409, "update_id_conflict"):
+                store.updateJob(id: jobId, now: now()) { j in
+                    j.fileUpdate?.updateId = PendingFileUpdate.makeUpdateId(now: now())
+                    j.fileUpdate?.attempts += 1
+                }
+                if (store.job(id: jobId)?.fileUpdate?.attempts ?? 0) > 3 { mark(.failed, e.message) }
+            default:
+                if e.isRetryable { scheduleFileUpdateRetry(jobId, message: e.message, retryAfter: e.retryAfter) }
+                else { mark(.failed, e.localizedDescription) }
+            }
+        } catch {
+            switch FailureClass.classify(error, now: now()) {
+            case .offline:
+                store.updateJob(id: jobId, now: now()) { $0.fileUpdate?.message = "Waiting for internet"; $0.fileUpdate?.nextAttemptAt = now().addingTimeInterval(30) }
+            case .retryable(let m, let ra):
+                scheduleFileUpdateRetry(jobId, message: m, retryAfter: ra)
+            case .cancelled, .deferred:
+                return
+            case .fatal(let je):
+                mark(.failed, je.message)
+            }
+        }
+    }
+
+    private func scheduleFileUpdateRetry(_ jobId: UUID, message: String, retryAfter: TimeInterval?) {
+        let t = now()
+        var gaveUp = false
+        store.updateJob(id: jobId, now: t) { j in
+            guard var f = j.fileUpdate else { return }
+            f.attempts += 1
+            let first = f.firstRetryAt ?? t
+            f.firstRetryAt = first
+            if let next = retryPolicy.nextAttempt(attempt: f.attempts, firstRetryAt: first, now: t, retryAfter: retryAfter) {
+                f.nextAttemptAt = next
+                f.message = "Will retry — \(message)"
+            } else {
+                gaveUp = true
+            }
+            j.fileUpdate = f
+        }
+        if gaveUp {
+            store.updateJob(id: jobId, now: t) { $0.fileUpdate?.state = .failed; $0.fileUpdate?.message = "Gave up after retrying for 24 hours: \(message)" }
         }
     }
 
@@ -851,7 +974,7 @@ extension JobEngine {
         if gaveUp { markReplacement(jobId, state: .failed, message: "Gave up after retrying for 24 hours: \(message)") }
     }
 
-    private func completeReplacement(_ jobId: UUID, version: NoteVersion, response: NoteReplaceResponse?) {
+    private func completeReplacement(_ jobId: UUID, version: NoteVersion, response: NoteReplaceResponse?, files: [LessonAttachment]? = nil) {
         let t = now()
         store.updateJob(id: jobId, now: t) { j in
             j.materialiseVersions()
@@ -873,10 +996,17 @@ extension JobEngine {
                 if let n = r.noteId { j.noteId = n }
                 j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
                 if r.status != .published { j.publishedAt = nil }
+                if let f = r.files { j.remoteFiles = f }
+            }
+            if let files {
+                j.submittedAttachments = files
+                if response?.files == nil { j.remoteFiles = files.map { RemoteFile(filename: $0.filename, size: $0.byteCount) } }
+                if j.fileUpdate?.files.map(\.id) == files.map(\.id) { j.fileUpdate = nil }
             }
             j.remoteCheckedAt = t
             j.replacement = nil
         }
+        if files != nil { store.pruneAttachmentFiles(jobId: jobId) }
         emit(.replaced(jobId: jobId))
     }
 }
@@ -933,6 +1063,7 @@ public enum StatusSync {
                 if let nid = r.noteId { j.noteId = nid }
                 if let v = r.version { j.remoteVersion = v }
                 if let len = r.lessonLength { j.lessonLengthSynced = len }
+                if let f = r.files { j.remoteFiles = f }
                 j.remoteUpdatedAt = r.updatedAt ?? j.remoteUpdatedAt
                 if r.status == .published {
                     j.publishedAt = r.publishedAt.flatMap(CoreFormat.parseISO8601) ?? j.publishedAt ?? now
