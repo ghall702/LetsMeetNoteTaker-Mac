@@ -179,6 +179,10 @@ public struct Job: Codable, Identifiable, Equatable, Sendable {
     public var remoteFiles: [RemoteFile]?
     /// A queued "update files only" request for an uploaded note.
     public var fileUpdate: PendingFileUpdate?
+    /// Lesson video upload (separate from the notes; nil = not queued).
+    public var video: VideoUploadState?
+    /// Result of checking the website for an existing video (historical backfill).
+    public var videoProbe: VideoProbe?
 
     /// Files can be changed whenever the lesson isn't mid-upload. Before upload, a change
     /// discards a prepared upload (new submission id). After upload, the change stays on this

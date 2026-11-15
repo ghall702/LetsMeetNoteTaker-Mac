@@ -12,6 +12,7 @@ struct SettingsView: View {
             TranscriptionSettings().tabItem { Label("Transcription", systemImage: "waveform") }.tag(3)
             RecordingSettings().tabItem { Label("Recordings", systemImage: "video") }.tag(4)
             GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag(5)
+            VideoSettingsView().tabItem { Label("Videos", systemImage: "play.rectangle") }.tag(7)
             PrivacyInfo().tabItem { Label("Privacy", systemImage: "lock.shield") }.tag(6)
         }
         .padding(12)
@@ -373,7 +374,7 @@ struct TranscriptionSettings: View {
             } header: {
                 Text("Whisper models (on-device)")
             } footer: {
-                Text("Transcription runs entirely on this Mac with WhisperKit (Core ML). Models download from Hugging Face. Larger “large-v3 turbo” models are more accurate; smaller ones are faster. Audio and video are never uploaded.")
+                Text("Transcription runs entirely on this Mac with WhisperKit (Core ML). Models download from Hugging Face. Larger “large-v3 turbo” models are more accurate; smaller ones are faster. Audio is never uploaded for transcription.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -549,12 +550,67 @@ struct PrivacyInfo: View {
 struct PrivacyPoints: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Recordings and audio stay on this Mac. Transcription happens on-device; extracted audio is temporary and deleted after each job. Original Zoom recordings are never deleted.", systemImage: "desktopcomputer")
+            Label("Transcription happens on this Mac; extracted audio is temporary and deleted after each job. Audio and video are never sent to OpenAI. Original Zoom recordings are never changed or deleted.", systemImage: "desktopcomputer")
+            Label("Lesson videos (when video uploads are on) go only to your own media server through LetsMeet's signed, expiring upload links. Pupils can watch a video only on an approved note, after signing in.", systemImage: "play.rectangle")
             Label("OpenAI receives the transcript text and lesson context (pupil name, date) to write the notes, using your own API key with store: false.", systemImage: "sparkles")
             Label("The LetsMeet website receives the notes, private tutor notes, the complete transcript and recording file names/metadata. New notes wait for your approval; pupils only ever see approved pupil-facing notes.", systemImage: "globe")
             Label("API keys are kept in the macOS Keychain. Transcripts, notes and keys are never written to logs. No analytics or other third parties.", systemImage: "key")
             Label("Local transcripts follow your retention setting and can be deleted from History at any time. Deleting local data never deletes website records.", systemImage: "trash")
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+
+struct VideoSettingsView: View {
+    @EnvironmentObject var model: AppModel
+    @State private var leftover: [URL] = []
+    @State private var stored: Int64 = 0
+
+    var body: some View {
+        Form {
+            Section("Uploads") {
+                Toggle("Upload lesson videos automatically", isOn: Binding(get: { model.settings.video.autoUpload }, set: { v in model.updateSettings { $0.video.autoUpload = v } }))
+                Text("After a lesson's notes are uploaded, its recording is uploaded and attached to the note. Combined lessons are joined into one MP4 first. Lessons uploaded before video uploads were turned on are handled by the historical backfill on the Videos page.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Simultaneous uploads", selection: Binding(get: { model.settings.video.maxConcurrentUploads }, set: { v in model.updateSettings { $0.video.maxConcurrentUploads = v } })) {
+                    ForEach(1...3, id: \.self) { Text("\($0)").tag($0) }
+                }
+                Toggle("Pause video uploads", isOn: Binding(get: { model.settings.video.paused }, set: { v in model.setVideoUploadsPaused(v) }))
+            }
+            Section("Retries") {
+                Toggle("Retry automatically after network or server errors", isOn: Binding(get: { model.settings.video.autoRetry }, set: { v in model.updateSettings { $0.video.autoRetry = v } }))
+                Stepper("Keep retrying for \(model.settings.video.retryWindowHours) hours", value: Binding(get: { model.settings.video.retryWindowHours }, set: { v in model.updateSettings { $0.video.retryWindowHours = v } }), in: 1...168)
+                    .disabled(!model.settings.video.autoRetry)
+                Text("Retries wait 30 s, 1 min, 5 min, 15 min, 30 min, then hourly, and always respect LetsMeet's “retry after”. Nothing completed is redone.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Joined videos") {
+                LabeledContent("Saved in") {
+                    Text(model.videoFolder.url.path).font(.caption).textSelection(.enabled).lineLimit(2).truncationMode(.middle)
+                }
+                HStack {
+                    Button("Choose Folder…") { model.chooseMergedFolder() }
+                    if model.settings.video.mergedFolderBookmark != nil { Button("Use App Folder") { model.useDefaultMergedFolder() } }
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.videoFolder.url]) }
+                }
+                Toggle("Delete a joined video once LetsMeet confirms the upload", isOn: Binding(get: { model.settings.video.deleteMergedAfterUpload }, set: { v in model.updateSettings { $0.video.deleteMergedAfterUpload = v } }))
+                HStack {
+                    Text("Joined videos stored: \(stored.fileSize)" + (leftover.isEmpty ? "" : " · \(leftover.count) no longer needed"))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Delete Unneeded Joined Videos") { model.deleteLeftoverMergedFiles(); refresh() }.disabled(leftover.isEmpty)
+                }
+                Text("Only copies made by this app are deleted. Your original Zoom recordings are never changed or deleted.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { refresh() }
+    }
+
+    func refresh() {
+        leftover = model.leftoverMergedFiles
+        stored = model.mergedFilesBytes
     }
 }

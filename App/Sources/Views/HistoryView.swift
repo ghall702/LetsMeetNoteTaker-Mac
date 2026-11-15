@@ -408,6 +408,8 @@ struct JobSection: View {
                 }
             }
 
+            if job.stage == .submitted || job.video != nil { JobVideoSection(lesson: lesson, job: job) }
+
             JobAttachmentsSection(job: job, onRegenerate: job.hasTranscript ? { regenerate = RegenerateRequest(draftId: nil) } : nil)
 
             if job.hasTranscript, let loaded = transcriptText, loaded.jobId == job.id {

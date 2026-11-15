@@ -148,6 +148,29 @@ enum DemoData {
                                   purpose: .lessonNotes, outcome: .succeeded,
                                   usage: TokenUsage(inputTokens: 210_000, cachedInputTokens: 0, outputTokens: 62_000, totalTokens: 272_000),
                                   estimatedCostUSD: nil, complimentaryEligible: true, source: "demo"))
+        // Sample video uploads (screenshots only): one uploaded, one uploading, one waiting for its recording,
+        // plus older lessons for the historical backfill.
+        store.updateSettings { $0.video.automaticSince = now.addingTimeInterval(-3_600) }
+        let submitted = store.allLessons.flatMap { l in l.jobs.filter { $0.stage == .submitted }.map { (l, $0) } }
+        for (i, pair) in submitted.enumerated() {
+            var v = VideoQueue.makeState(lesson: pair.0, job: pair.1, origin: i == 0 ? .automatic : .backfill, now: now)
+            v.noteId = pair.1.noteId ?? "demo-note-\(i)"
+            switch i {
+            case 0: v.stage = .ready; v.recordingId = "demo-rec-0"; v.fileSize = 734_003_200; v.durationSec = 1700; v.completedAt = now
+            case 1: v.stage = .uploading; v.recordingId = "demo-rec-1"; v.fileSize = 734_003_200
+            default:
+                v.stage = .failed; v.errorKind = .recordingsMissing
+                v.lastError = "Original recording not found: zoom_0.mp4. Reconnect the drive or folder, then Retry."
+            }
+            store.updateJob(id: pair.1.id) { $0.video = v }
+        }
+        for (d, mode, n) in [(20.0, ProcessingMode.combined, 3), (27.0, .single, 1), (34.0, .combined, 2), (41.0, .single, 1)] {
+            if var l = lesson("Daniel", danielRoom, daniel, daysAgo: d, mode: mode, n: n) {
+                l.jobs[0].stage = .submitted; l.jobs[0].noteId = "demo-\(Int(d))"; l.jobs[0].remoteStatus = .published
+                l.jobs[0].submittedAt = now.addingTimeInterval(-d * 86_400); l.jobs[0].notes = notes
+                store.addLesson(l)
+            }
+        }
         let folder = "/Users/Shared/Zoom/2026-11-14 16.00.12 LetsMeet - EE"
         store.upsertDetection(PendingDetection(folderPath: folder, recordings: [
             ScannedRecording(path: folder + "/zoom_0.mp4", fileSize: 512_000_000, durationSeconds: 1810),

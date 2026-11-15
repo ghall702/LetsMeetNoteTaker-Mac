@@ -79,7 +79,7 @@ enum AudioExtractionError: LocalizedError {
 }
 
 /// Extracts 16 kHz mono 16-bit PCM WAV into the app's temporary folder.
-/// Audio never leaves the Mac; the file is deleted by the engine as soon as transcription ends.
+/// The audio is only used for on-device transcription and is deleted as soon as it ends.
 struct AVAudioExtractor: AudioExtracting {
     func extractAudio(for recording: RecordingRef, into directory: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let out = directory.appendingPathComponent(recording.id.uuidString + ".wav")

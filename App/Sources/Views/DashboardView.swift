@@ -20,6 +20,17 @@ struct DashboardView: View {
                 if !model.heldJobs.isEmpty { heldCard }
                 activeCard
                 if !model.attentionJobs.isEmpty { attentionCard }
+                if !model.activeVideoJobs.isEmpty || !model.failedVideoJobs.isEmpty {
+                    Card(title: "Lesson videos", systemImage: "play.rectangle") {
+                        ForEach(Array(model.activeVideoJobs.prefix(2))) { VideoProgressRow(item: $0) }
+                        HStack {
+                            Text("\(model.activeVideoJobs.count) in the queue" + (model.failedVideoJobs.isEmpty ? "" : " · \(model.failedVideoJobs.count) need attention"))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Open Videos") { model.sidebar = .videos }.buttonStyle(.link)
+                        }
+                    }
+                }
                 recentCard
             }
             .padding(20)

@@ -30,6 +30,7 @@ struct MainWindow: View {
                 case .dashboard: DashboardView()
                 case .history: HistoryView()
                 case .students: StudentsView()
+                case .videos: VideosView()
                 case .usage: UsageView()
                 case .settings: SettingsView()
                 }
@@ -74,6 +75,7 @@ struct MainWindow: View {
     func badge(for item: SidebarItem) -> Int {
         switch item {
         case .dashboard: return model.detections.count + model.attentionJobs.count
+        case .videos: return model.failedVideoJobs.count
         default: return 0
         }
     }

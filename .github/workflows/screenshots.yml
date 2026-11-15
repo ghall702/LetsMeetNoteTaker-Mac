@@ -28,7 +28,7 @@ jobs:
           APP="build/Build/Products/Release/Lesson Notes.app"
           TMPF="$HOME/Library/Containers/com.georgehalltuition.lessonnotes/Data/tmp/lessonnotes-window.json"
           mkdir -p shots
-          for SPEC in regenfiles:light files:light usage:light dashboard:light review:light regenerate:light history:light students:light settings:light dashboard:dark history:dark; do
+          for SPEC in videos:light videos:dark usage:light dashboard:light review:light regenerate:light history:light students:light settings:light dashboard:dark history:dark; do
             MODE=${SPEC%%:*}; LOOK=${SPEC##*:}; NAME="$MODE-$LOOK"
             rm -f "$TMPF"
             LESSONNOTES_DEMO=$MODE LESSONNOTES_APPEARANCE=$LOOK "$APP/Contents/MacOS/LessonNotes" > /dev/null 2>&1 &

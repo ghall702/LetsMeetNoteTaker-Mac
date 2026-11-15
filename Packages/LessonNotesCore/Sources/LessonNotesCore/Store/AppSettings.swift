@@ -55,6 +55,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var openAIPauseAllowsToday: Bool = true
     /// Name new PDF files "macOS Preview <name>.pdf".
     public var pdfPreviewPrefix: Bool = true
+    /// Lesson video uploads (automatic and historical backfill).
+    public var video = VideoSettings()
 
     public init() {}
 
@@ -74,7 +76,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case websiteBaseURL, openAIModel, reasoningEffort, globalPrompt, transcriptionModel, transcriptionLanguage, zoomFolderPath,
              zoomFolderBookmark, watchFolder, autoProcessAfterConfirm, retention, timeZoneIdentifier,
              chunkThresholdTokens, maxConcurrentJobs, onboardingCompleted, installId, notifyOnSubmitted, maxOutputTokens, maxConcurrentTranscriptions, usage,
-             openAIPaused, openAIPauseAllowsToday, pdfPreviewPrefix
+             openAIPaused, openAIPauseAllowsToday, pdfPreviewPrefix, video
     }
 
     public init(from decoder: Decoder) throws {
@@ -103,5 +105,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         openAIPaused = try c.decodeIfPresent(Bool.self, forKey: .openAIPaused) ?? d.openAIPaused
         openAIPauseAllowsToday = try c.decodeIfPresent(Bool.self, forKey: .openAIPauseAllowsToday) ?? d.openAIPauseAllowsToday
         pdfPreviewPrefix = try c.decodeIfPresent(Bool.self, forKey: .pdfPreviewPrefix) ?? d.pdfPreviewPrefix
+        video = (try? c.decodeIfPresent(VideoSettings.self, forKey: .video)) ?? d.video
     }
 }

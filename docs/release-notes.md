@@ -9,7 +9,14 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.8
+### What's in 1.9
+- **Lesson videos on LetsMeet:** after a lesson's notes are uploaded, its recording is uploaded and attached to the same note (Settings → Videos; on by default for new lessons). Uploads go straight to your media server through LetsMeet's signed, expiring links and stream from disk.
+- **Combined lessons become one video:** recordings that were combined into one set of notes are joined into one continuous MP4 in their saved order (lossless when the parts match, re-encoded only when they don't), checked, then uploaded. Separate lessons upload each part to its own note.
+- **Historical backfill** (Videos page): finds lessons uploaded before this version, checks their original recordings, can look up which notes already have a video, and uploads the rest when you press **Start Backfill**. Pause, resume and retry at any time; progress survives quitting. Existing notes are never resubmitted or changed.
+- **Video management:** watch or download (staff link), check availability, replace or delete a video on LetsMeet. Original recordings are never changed or deleted.
+- Progress with percentage, size and speed, a separate queue (1–3 at once), automatic retries following the API guidance, and cleanup of joined files.
+
+### Also in 1.8
 - **Change the files on an uploaded note** — no new note needed:
   - **Update Files on LetsMeet** swaps the note's downloadable files only. The notes and their approval are unchanged, so a published note shows the new files straight away.
   - **Regenerate Notes** with changed files: accepting the new notes also replaces the files in the same update, and the note returns to Waiting for approval.

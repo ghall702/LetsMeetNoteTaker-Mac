@@ -46,7 +46,7 @@ flowchart LR
 ```
 
 Once you press **Confirm**, everything else is automatic — extraction, transcription, notes, upload and status tracking.
-Audio and video never leave the Mac.
+Transcription happens on the Mac; lesson videos go only to your own media server, attached to the approved note.
 
 ## Features
 
@@ -154,7 +154,8 @@ Audio and video never leave the Mac.
 
 | Data | Where it goes |
 | --- | --- |
-| 🎥 Recordings & audio | **Stay on your Mac.** Audio is extracted to a temporary file and deleted after each lesson; originals are never deleted. |
+| 🎙️ Audio for transcription | **Stays on your Mac.** Extracted to a temporary file and deleted after each lesson. Never sent to OpenAI. |
+| 🎥 Lesson videos | Uploaded (when video uploads are on) to your own media server through LetsMeet's signed, expiring links, attached to the note. Pupils can watch only approved notes. Originals are never changed or deleted. |
 | 📝 Transcript text | OpenAI (to write the notes, `store: false`) and LetsMeet (stored for you in Admin Tools; never shown to pupils). |
 | 📎 Lesson files | Copied into the app when you add them. Uploaded to LetsMeet with the note (pupils can download them after you approve). Files you mark **Include in AI context** are also sent to OpenAI with the transcript (`store: false`). Audio and video are never accepted. |
 | 📚 Lesson notes | LetsMeet — pupils only see notes **after you approve them**. Private tutor notes are never shown to pupils. |

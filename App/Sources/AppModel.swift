@@ -4,13 +4,14 @@ import AppKit
 import LessonNotesCore
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case dashboard, history, students, usage, settings
+    case dashboard, history, students, videos, usage, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .dashboard: return "Dashboard"
         case .history: return "History"
         case .students: return "Students"
+        case .videos: return "Videos"
         case .usage: return "API Usage"
         case .settings: return "Settings"
         }
@@ -20,6 +21,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .dashboard: return "rectangle.grid.2x2"
         case .history: return "clock.arrow.circlepath"
         case .students: return "person.2"
+        case .videos: return "play.rectangle"
         case .usage: return "chart.bar.xaxis"
         case .settings: return "gearshape"
         }
@@ -69,6 +71,13 @@ final class AppModel: ObservableObject {
     private(set) var usageMonitor: UsageMonitor!
     @Published var usageVersion = 0
     private(set) var engine: JobEngine!
+    private(set) var videoEngine: VideoUploadEngine!
+    let videoFolder = VideoFolder()
+    @Published var videoProgress: [UUID: VideoProgress] = [:]
+    @Published var backfillReport: VideoBackfillReport?
+    @Published var isScanningBackfill = false
+    @Published var probeDone = 0
+    @Published var probeTotal = 0
     private var transcriber: WhisperTranscriber!
     private var watcher: FolderWatcher?
     private var watchedFolderURL: URL?
@@ -197,6 +206,16 @@ final class AppModel: ObservableObject {
         var engineDeps = deps
         engineDeps.materialLoader = AppMaterials.loader
         engine = JobEngine(store: store, deps: engineDeps, tempRoot: AppInfo.tempAudioDirectory)
+        // Lesson videos: a separate queue, using the same LetsMeet key and signed upload URLs.
+        videoFolder.configure(settings: store.settings.video)
+        let folder = videoFolder
+        videoEngine = VideoUploadEngine(store: store, deps: VideoDependencies(
+            makeAPI: { @Sendable in
+                guard let key = KeychainStore.get(.website), !key.isEmpty else { throw LetsMeetClientError.missingKey }
+                return try LetsMeetClient(baseURLString: store.settings.websiteBaseURL, apiKey: key, transport: URLSessionTransport(timeout: 120))
+            },
+            media: AVVideoMedia(), uploader: URLSessionSignedUploader(),
+            isOnline: { net.isOnline }, videosDirectory: { folder.url }))
         detection = DetectionMonitor(model: self)
     }
 
@@ -213,7 +232,7 @@ final class AppModel: ObservableObject {
         network.onChange = { [weak self] online in
             guard let self else { return }
             self.isOnline = online
-            if online { Task { await self.engine.tick(); await self.syncStatuses(force: false) } }
+            if online { Task { await self.engine.tick(); await self.syncStatuses(force: false); await self.videoEngine.tick() } }
         }
         let handler: @Sendable (EngineEvent) -> Void = { [weak self] event in
             Task { @MainActor in self?.handle(event) }
@@ -223,6 +242,7 @@ final class AppModel: ObservableObject {
             await engine.recoverAfterLaunch()
             await engine.start()
         }
+        startVideoUploads()
         startWatching()
         store.applyRetention(settings.retention)
         Task { await refreshRooms(silent: true) }
@@ -269,6 +289,11 @@ final class AppModel: ObservableObject {
         case "students": sidebar = .students; demoSelectFirstStudent = true
         case "settings": sidebar = .settings; settingsTab = 1
         case "usage": sidebar = .usage
+        case "videos": sidebar = .videos
+            backfillReport = VideoBackfill.scan(store: store) { $0.fileSize > 0 ? $0.fileSize : nil }
+            for item in allJobs where item.job.video?.stage == .uploading {
+                videoProgress[item.job.id] = VideoProgress(message: "Uploading video", fraction: 0.37, sentBytes: 271_000_000, totalBytes: 734_003_200, bytesPerSecond: 6_400_000, updatedAt: Date())
+            }
         case "onboarding": showOnboarding = true
         default: sidebar = .dashboard
         }
@@ -311,6 +336,7 @@ final class AppModel: ObservableObject {
             progress[id] = JobProgress(fraction: f, message: m)
         case .submitted(let id):
             progress[id] = nil
+            Task { await videoEngine.tick() }   // queues the lesson video (if automatic uploads are on)
             if settings.notifyOnSubmitted, let l = store.lesson(containingJob: id) {
                 NotificationService.shared.notify(title: "Lesson notes submitted",
                                                   body: "\(l.pupilName), \(CoreFormat.longUKDate(l.lessonDate)) — waiting for approval on the website.",
@@ -651,6 +677,11 @@ final class AppModel: ObservableObject {
 
     func deleteLocal(_ lesson: Lesson) {
         for j in lesson.jobs where j.stage.isActive { Task { await engine.cancel(jobId: j.id) } }
+        for j in lesson.jobs {
+            if j.video?.stage.isActive == true { Task { await videoEngine.cancel(jobId: j.id) } }
+            // A merged copy belongs to the app; the original recordings are never deleted.
+            if let m = j.video?.mergedFilename { try? FileManager.default.removeItem(at: videoFolder.url.appendingPathComponent(m)) }
+        }
         store.deleteLesson(id: lesson.id)
         if selectedLessonId == lesson.id { selectedLessonId = nil }
         reload()
