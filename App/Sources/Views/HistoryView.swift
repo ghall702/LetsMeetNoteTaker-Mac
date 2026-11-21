@@ -111,9 +111,9 @@ struct HistoryRow: View {
                     Text(CoreFormat.longUKDate(lesson.lessonDate)).font(.system(size: 11)).foregroundStyle(Theme.ink3)
                 }
                 Text(lesson.title).font(.system(size: 12.5)).foregroundStyle(Theme.ink2).lineLimit(2)
-                HStack(spacing: 4) {
+                FlowPills(spacing: 4) {
                     ForEach(lesson.jobs) { StatusChip(job: $0) }
-                    if lesson.mode != .single { Text(lesson.mode.rawValue).font(.system(size: 10.5)).foregroundStyle(Theme.ink3) }
+                    if lesson.mode != .single { Text(lesson.mode.rawValue).font(.system(size: 10.5)).foregroundStyle(Theme.ink3).padding(.top, 3) }
                 }
                 .padding(.top, 1)
             }
@@ -270,11 +270,8 @@ struct LessonDetailView: View {
                 Button("Reprocessed from an earlier lesson — show original") { model.selectedLessonId = orig }
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.sageInk)
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { headerButtons }
-                VStack(alignment: .leading, spacing: 8) { headerButtons }
-            }
-            .padding(.top, 2)
+            FlowPills(spacing: 8) { headerButtons }
+                .padding(.top, 2)
         }
     }
 

@@ -14,10 +14,10 @@ struct DashboardView: View {
                     if let e = model.watchError {
                         Label(e, systemImage: "exclamationmark.triangle").font(.system(size: 12.5)).foregroundStyle(Theme.clayInk)
                     }
-                    if geo.size.width >= 1000 {
+                    if geo.size.width >= 900 {
                         HStack(alignment: .top, spacing: 18) {
                             mainColumn.frame(maxWidth: .infinity)
-                            sideColumn.frame(width: min(360, geo.size.width * 0.3))
+                            sideColumn.frame(width: min(340, geo.size.width * 0.34))
                         }
                     } else {
                         VStack(spacing: 18) { mainColumn; sideColumn }
@@ -137,7 +137,7 @@ struct DashboardView: View {
                     } label: {
                         Label("Review & confirm", systemImage: "checkmark")
                             .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(Theme.forest)
+                            .foregroundStyle(Color(nsColor: NSColor(hex: 0x2F4135)))
                             .padding(.horizontal, 18).padding(.vertical, 10)
                             .background(Capsule().fill(Color(nsColor: NSColor(hex: 0xF7F3EA))))
                     }

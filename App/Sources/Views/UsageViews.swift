@@ -139,7 +139,8 @@ struct UsageView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Card(title: "Today", systemImage: "gauge.with.dots.needle.33percent") { UsagePanel() }
+                ScreenTitle(title: "API usage", subtitle: "OpenAI tokens, allowance and estimated spend").appearIn(0)
+                Card(title: "Today", systemImage: "gauge.with.dots.needle.33percent") { UsagePanel() }.appearIn(1)
                 periodsCard
                 topLessonsCard
                 recentCard
@@ -153,7 +154,7 @@ struct UsageView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 28).padding(.vertical, 22)
         }
         .navigationTitle("API Usage")
     }

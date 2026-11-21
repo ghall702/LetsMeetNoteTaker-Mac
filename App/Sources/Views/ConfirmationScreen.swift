@@ -170,19 +170,20 @@ struct ConfirmationScreen: View {
             Text("Who and when").eyebrow()
             HStack(spacing: 9) {
                 ForEach(pupilCards) { o in pupilCard(o) }
-                Menu {
-                    ForEach(options) { o in Button(o.title) { withAnimation(Theme.spring) { studentId = o.id } } }
-                } label: {
-                    Text(pupilCards.isEmpty ? "Choose a pupil…" : "Other…")
-                        .font(.system(size: 12.5)).foregroundStyle(Theme.ink2)
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.raised.opacity(0.6))
+                    RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.line, lineWidth: 1.5)
+                    Menu {
+                        ForEach(options) { o in Button(o.title) { withAnimation(Theme.spring) { studentId = o.id } } }
+                    } label: {
+                        Text(pupilCards.isEmpty ? "Choose a pupil…" : "Other…")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .font(.system(size: 12.5))
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .padding(.horizontal, 8)
-                .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.raised.opacity(0.6)))
-                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.line, lineWidth: 1.5))
-                .frame(maxWidth: pupilCards.isEmpty ? .infinity : 130)
+                .frame(maxWidth: pupilCards.isEmpty ? .infinity : 110)
+                .frame(height: 54)
                 .disabled(options.isEmpty)
             }
             if options.isEmpty {
@@ -260,10 +261,10 @@ struct ConfirmationScreen: View {
     var recordingsCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(rows.count > 1 ? "Recordings · drag to reorder" : "Recordings").eyebrow()
+                Text("Recordings").eyebrow()
                 Spacer()
                 if rows.count > 1 {
-                    Text("\(selection.count) of \(rows.count) included").font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                    Text("Drag to reorder · \(selection.count) of \(rows.count) included").font(.system(size: 11)).foregroundStyle(Theme.ink3)
                 }
             }
             VStack(spacing: 8) {
@@ -344,6 +345,7 @@ struct ConfirmationScreen: View {
                 Text(rowDetail(row))
                     .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).lineLimit(1)
             }
+            .layoutPriority(1)
             Spacer(minLength: 4)
             if let part, selectedRows.count > 1 {
                 Pill(text: "Part \(part)", tone: row.addedByUser ? .sage : .neutral)
@@ -527,8 +529,8 @@ struct ConfirmationScreen: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(summaryTitle).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
                 HStack(spacing: 6) {
-                    Pill(text: recordingSummary, tone: selectedRows.count > 1 && mode == nil ? .sand : .neutral)
-                    Pill(text: fileSummary, tone: files.isEmpty ? .neutral : .sage)
+                    Pill(text: recordingSummary, tone: selectedRows.count > 1 && mode == nil ? .sand : .neutral).fixedSize()
+                    Pill(text: fileSummary, tone: files.isEmpty ? .neutral : .sage).fixedSize()
                 }
             }
             if let error {
@@ -903,10 +905,7 @@ struct RoleSegments: View {
             ForEach(AttachmentRole.allCases) { r in
                 let on = r == role
                 Button { withAnimation(Theme.spring) { role = r } } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: r.systemImage).font(.system(size: 10.5))
-                        Text(Self.shortLabel(r)).lineLimit(1)
-                    }
+                    Text(Self.shortLabel(r)).lineLimit(1).minimumScaleFactor(0.8)
                     .font(.system(size: 12, weight: on ? .semibold : .regular))
                     .foregroundStyle(on ? Theme.onForest : Theme.ink2)
                     .frame(maxWidth: .infinity)
@@ -941,7 +940,11 @@ struct UseToggle: View {
                     Circle().fill(.white).frame(width: 14, height: 14).padding(2)
                         .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
                 }
-                label.font(.system(size: 12)).lineLimit(1).minimumScaleFactor(0.85)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Text(detail).font(.system(size: 11)).foregroundStyle(Theme.ink2)
+                }
+                .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9).padding(.vertical, 7)

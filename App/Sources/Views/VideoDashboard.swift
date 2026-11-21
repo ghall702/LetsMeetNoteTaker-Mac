@@ -81,7 +81,7 @@ struct StorageCard: View {
                     .frame(width: 150, height: 150)
                     .overlay {
                         VStack(spacing: 0) {
-                            Text(ByteFormat.percent(b.usedFraction)).font(.title2.weight(.bold).monospacedDigit())
+                            Text(ByteFormat.percent(b.usedFraction)).font(Theme.serif(28))
                             Text("used").font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -126,11 +126,11 @@ struct StorageCard: View {
 
     func slices(_ b: StorageBreakdown) -> [StorageSlice] {
         var out: [StorageSlice] = []
-        if let r = b.recordings { out.append(StorageSlice(name: "Lesson recordings", bytes: r, color: .accentColor)) }
-        if let o = b.otherUsed { out.append(StorageSlice(name: "Other files", bytes: o, color: .orange)) }
-        else { out.append(StorageSlice(name: "Used", bytes: b.used, color: .orange)) }
-        if b.reserved > 0 { out.append(StorageSlice(name: "File system reserve", bytes: b.reserved, color: .gray)) }
-        out.append(StorageSlice(name: "Available", bytes: b.available, color: .green.opacity(0.45)))
+        if let r = b.recordings { out.append(StorageSlice(name: "Lesson recordings", bytes: r, color: Theme.forest)) }
+        if let o = b.otherUsed { out.append(StorageSlice(name: "Other files", bytes: o, color: Theme.sandInk)) }
+        else { out.append(StorageSlice(name: "Used", bytes: b.used, color: Theme.sandInk)) }
+        if b.reserved > 0 { out.append(StorageSlice(name: "File system reserve", bytes: b.reserved, color: Theme.ink3)) }
+        out.append(StorageSlice(name: "Available", bytes: b.available, color: Theme.sage.opacity(0.45)))
         return out
     }
 }
@@ -285,7 +285,7 @@ struct BandwidthCard: View {
                 .foregroundStyle(by: .value("Kind", b.kind))
         }
         .chartForegroundStyleScale(domain: separate ? ["Uploads", "Playback"] : ["Total"],
-                                   range: separate ? [Color.accentColor, Color.purple] : [Color.accentColor])
+                                   range: separate ? [Theme.forest, Theme.lavInk] : [Theme.forest])
         .chartYAxis {
             AxisMarks { v in
                 AxisGridLine()

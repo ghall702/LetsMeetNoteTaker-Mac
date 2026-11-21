@@ -42,16 +42,14 @@ struct VideosView: View {
 
     var header: some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Lesson videos").font(.title2.weight(.semibold))
-                Text(statusLine).foregroundStyle(.secondary)
-            }
+            ScreenTitle(title: "Lesson videos", subtitle: statusLine)
             Spacer()
             Button { model.setVideoUploadsPaused(!model.settings.video.paused) } label: {
                 Label(model.settings.video.paused ? "Resume Uploads" : "Pause Uploads",
                       systemImage: model.settings.video.paused ? "play.circle" : "pause.circle")
             }
             Button { model.settingsTab = 7; model.sidebar = .settings } label: { Label("Video Settings", systemImage: "gearshape") }
+                .buttonStyle(.soft)
         }
     }
 
@@ -101,7 +99,7 @@ struct VideosView: View {
                     }
                 }
                 .padding(10)
-                .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.sageTint.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             if let r = model.backfillReport {
                 Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 8) {

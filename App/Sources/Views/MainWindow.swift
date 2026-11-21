@@ -36,6 +36,7 @@ struct MainWindow: View {
             .animation(.easeOut(duration: 0.22), value: model.sidebar)
             .toolbarBackground(Theme.bg, for: .windowToolbar)
             .scrollContentBackground(.hidden)
+            .buttonStyle(.soft)
         }
         .tint(Theme.forest)
         .alert(item: $model.retryConfirmation) { c in
