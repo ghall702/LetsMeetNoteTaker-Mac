@@ -10,7 +10,8 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Lesson Notes").font(.headline)
+                AppLogo(size: 22)
+                Text("Lesson Notes").font(Theme.serif(18)).foregroundStyle(Theme.ink)
                 Spacer()
                 if !model.isOnline { Label("Offline", systemImage: "wifi.slash").font(.caption).foregroundStyle(.orange) }
             }
@@ -58,6 +59,7 @@ struct MenuBarView: View {
         .buttonStyle(.plain)
         .padding(14)
         .frame(width: 340)
+        .tint(Theme.forest)
     }
 
     func open() {

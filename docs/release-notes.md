@@ -9,7 +9,16 @@
 3. First launch only: macOS blocks apps that are not notarised. Open **System Settings → Privacy & Security** and click **Open Anyway**.
 4. If macOS asks whether the app may use its saved keychain items, click **Always Allow**.
 
-### What's in 1.10
+### What's in 2.0 — a fresh look
+- **Redesigned throughout:** a calm botanical look with soft cards, a serif for headings and gentle animations as things arrive, move and finish.
+- **New logo and menu-bar icon:** a page with a sprig. The menu-bar icon is wide, follows light and dark menu bars, shows a dot while lessons are processing and an exclamation mark when one needs you.
+- **Dashboard:** a greeting, a "ready for you" panel for new lessons, counts for transcribing / writing notes / sent today, an "In progress" list showing each lesson's step, and side cards for OpenAI today, what needs you and lesson videos.
+- **Confirm screen:** now a full window instead of a small sheet. Pick the pupil from cards, check the date, order the recordings, and add lesson files as cards with clear "What is it?" and "AI reads it / Pupil gets it" switches.
+- **Drag and drop MP4s:** drop an extra MP4 or M4A onto the recordings (or choose one) to add it as another part of the lesson. It is read from where it is and can be reordered or removed.
+- After you confirm, a message slides up to say the lesson is on its way.
+- The version history is in CHANGELOG.md, with a download for every earlier version.
+
+### Also in 1.10
 - **Video dashboard** on the Videos page: storage on the media server's 3 TB volume (doughnut chart: lesson recordings, other files, available), stored video count and total size, ready/unconfirmed counts from LetsMeet, and this Mac's queue (uploading, awaiting, failed).
 - **Bandwidth:** today, this week (Mon–Sun) and this month, uploads and playback separately, with a 14-day chart, plus whole-server traffic — once the media server statistics are available. Until then the page shows this Mac's own upload traffic, clearly labelled.
 - **Per-lesson upload progress:** lesson, pupil, file, size, status (Queued → Preparing → Merging → Ready to upload → Uploading → Verifying → Completed), percentage, bytes sent, real speed and time remaining, from the bytes actually sent. Backfill shows overall progress and which lesson is in progress.

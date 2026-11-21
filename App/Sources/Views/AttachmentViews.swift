@@ -26,6 +26,15 @@ enum AttachmentPicker {
         return panel.runModal() == .OK ? panel.urls : []
     }
 
+    /// A first guess at what a file is, from its type. George can change it.
+    static func guessRole(_ filename: String) -> AttachmentRole {
+        switch (filename as NSString).pathExtension.lowercased() {
+        case "ppt", "pptx", "key": return .slides
+        case "jpg", "jpeg", "png", "heic", "gif", "webp": return .studentWork
+        default: return .other
+        }
+    }
+
     static func size(_ url: URL) -> Int {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
     }

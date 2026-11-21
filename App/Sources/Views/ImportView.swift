@@ -77,7 +77,10 @@ struct ImportView: View {
         .frame(width: 1040, height: 700)
         .task { scanTask = Task { await scan() } }
         .sheet(item: $review, onDismiss: refreshQueued) { req in
-            ConfirmationSheet(request: req).environmentObject(model)
+            ConfirmationScreen(request: req, onClose: { review = nil })
+                .environmentObject(model)
+                .frame(width: 1100, height: 780)
+                .background(Theme.bg)
         }
     }
 

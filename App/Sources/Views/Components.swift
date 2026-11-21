@@ -5,49 +5,53 @@ import LessonNotesCore
 
 struct StatusChip: View {
     var text: String
-    var color: Color
+    var tone: Theme.Tone
     var icon: String?
 
     init(job: Job) {
         text = job.displayStatus
         if job.statusMessage == JobEngine.openAIPausedMessage && job.notes == nil && job.stage.isActive {
-            text = "OpenAI paused"; color = .purple; icon = "pause.circle"
+            text = "OpenAI paused"; tone = .lavender; icon = "pause.circle"
             return
         }
         switch job.stage {
         case .submitted:
             switch job.remoteStatus ?? .pending {
-            case .pending: color = .orange; icon = "hourglass"
-            case .published: color = .green; icon = "checkmark.seal.fill"
-            case .rejected: color = .red; icon = "xmark.octagon"
-            case .deleted: color = .gray; icon = "trash"
+            case .pending: tone = .sand; icon = "clock"
+            case .published: tone = .sage; icon = "checkmark.seal.fill"
+            case .rejected: tone = .clay; icon = "xmark.octagon"
+            case .deleted: tone = .neutral; icon = "trash"
             }
-        case .failed: color = .red; icon = job.error?.kind == .payloadTooLarge ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill"
-        case .cancelled: color = .gray; icon = "stop.circle"
-        case .held: color = .blue; icon = "pause.circle"
-        case .queued: color = .secondary; icon = "tray"
-        default: color = .accentColor; icon = "gearshape.2"
+        case .failed: tone = .clay; icon = job.error?.kind == .payloadTooLarge ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill"
+        case .cancelled: tone = .neutral; icon = "stop.circle"
+        case .held: tone = .lavender; icon = "pause.circle"
+        case .queued: tone = .neutral; icon = "tray"
+        default: tone = .sage; icon = nil
         }
     }
 
     init(_ text: String, color: Color, icon: String? = nil) {
         self.text = text
-        self.color = color
+        self.icon = icon
+        switch color {
+        case .orange, .yellow: tone = .sand
+        case .red: tone = .clay
+        case .green, .accentColor, .blue, .teal, .mint: tone = .sage
+        case .purple, .indigo: tone = .lavender
+        default: tone = .neutral
+        }
+    }
+
+    init(_ text: String, tone: Theme.Tone, icon: String? = nil) {
+        self.text = text
+        self.tone = tone
         self.icon = icon
     }
 
     var body: some View {
-        HStack(spacing: 4) {
-            if let icon { Image(systemName: icon).imageScale(.small) }
-            Text(text).lineLimit(1)
-        }
-        .font(.caption.weight(.medium))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(color.opacity(0.15)))
-        .foregroundStyle(color)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Status: \(text)")
+        Pill(text: text, tone: tone, icon: icon, dot: icon == nil)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Status: \(text)")
     }
 }
 
@@ -89,17 +93,16 @@ struct SecretField: View {
 struct Card<Content: View>: View {
     var title: String
     var systemImage: String
+    var tone: Theme.Tone = .sage
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage).font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            CardHeader(title: title, systemImage: systemImage, tone: tone)
             content
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
+        .cardSurface()
     }
 }
 
@@ -132,8 +135,7 @@ struct JobProgressRow: View {
                 StatusChip(job: job)
             }
             if job.stage.isActive {
-                ProgressView(value: p?.fraction ?? 0)
-                    .progressViewStyle(.linear)
+                SoftBar(value: p?.fraction ?? 0)
                 Text(p?.message ?? job.statusMessage ?? job.stage.label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             } else if let m = job.statusMessage, job.stage != .submitted {
                 Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(2)

@@ -54,16 +54,21 @@ struct HistoryView: View {
                             }
                     }
                 }
+                .scrollContentBackground(.hidden)
                 .overlay {
                     if filtered.isEmpty {
-                        Text(model.lessons.isEmpty ? "No lessons yet" : "No matching lessons").foregroundStyle(.secondary)
+                        VStack(spacing: 10) {
+                            Sprig(color: Theme.sage).frame(width: 40, height: 40)
+                            Text(model.lessons.isEmpty ? "No lessons yet" : "No matching lessons").font(.system(size: 13)).foregroundStyle(Theme.ink2)
+                        }
                     }
                 }
             }
+            .background(Theme.sidebar.opacity(0.55))
             .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
             Group {
                 if let l = model.lesson(model.selectedLessonId) {
-                    LessonDetailView(lesson: l)
+                    LessonDetailView(lesson: l).id(l.id)
                 } else {
                     Text("Select a lesson").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -97,19 +102,23 @@ struct HistoryView: View {
 struct HistoryRow: View {
     var lesson: Lesson
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(lesson.pupilName).font(.body.weight(.semibold))
-                Spacer()
-                Text(CoreFormat.longUKDate(lesson.lessonDate)).font(.caption).foregroundStyle(.secondary)
-            }
-            Text(lesson.title).lineLimit(1).foregroundStyle(.secondary)
-            HStack(spacing: 4) {
-                ForEach(lesson.jobs) { StatusChip(job: $0) }
-                if lesson.mode != .single { Text(lesson.mode.rawValue).font(.caption2).foregroundStyle(.tertiary) }
+        HStack(alignment: .top, spacing: 11) {
+            Avatar(name: lesson.pupilName, size: 34)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(lesson.pupilName).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text(CoreFormat.longUKDate(lesson.lessonDate)).font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                }
+                Text(lesson.title).font(.system(size: 12.5)).foregroundStyle(Theme.ink2).lineLimit(2)
+                HStack(spacing: 4) {
+                    ForEach(lesson.jobs) { StatusChip(job: $0) }
+                    if lesson.mode != .single { Text(lesson.mode.rawValue).font(.system(size: 10.5)).foregroundStyle(Theme.ink3) }
+                }
+                .padding(.top, 1)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
     }
 }
 
@@ -223,11 +232,11 @@ struct LessonDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                header
-                ForEach(lesson.jobs) { job in JobSection(lesson: lesson, job: job) }
-                recordings
+                header.appearIn(0)
+                ForEach(Array(lesson.jobs.enumerated()), id: \.element.id) { i, job in JobSection(lesson: lesson, job: job).appearIn(i + 1) }
+                recordings.appearIn(lesson.jobs.count + 1)
             }
-            .padding(20)
+            .padding(.horizontal, 26).padding(.vertical, 22)
         }
         .alert("Delete local data?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { model.deleteLocal(lesson) }
@@ -247,35 +256,40 @@ struct LessonDetailView: View {
     }
 
     var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(lesson.title).font(.title2.weight(.semibold)).textSelection(.enabled)
-            HStack(spacing: 12) {
-                Label(lesson.pupilName, systemImage: "person")
-                Label(CoreFormat.longUKDate(lesson.lessonDate), systemImage: "calendar")
-                if let s = lesson.startedAt { Label(s.formatted(date: .omitted, time: .shortened), systemImage: "clock") }
-                Label(lesson.mode.label, systemImage: "square.stack")
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(lesson.pupilName) · \(model.rooms.name(for: lesson.roomId) ?? lesson.roomName)").eyebrow()
+            Text(lesson.title).font(Theme.serif(32)).foregroundStyle(Theme.ink).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            FlowPills {
+                ForEach(lesson.jobs) { StatusChip(job: $0) }
+                Pill(text: CoreFormat.longUKDate(lesson.lessonDate) + (lesson.startedAt.map { " · " + $0.formatted(date: .omitted, time: .shortened) } ?? ""),
+                     tone: .neutral, icon: "calendar")
+                Pill(text: lesson.mode.label, tone: .neutral, icon: "square.stack")
+                Pill(text: "Date from \(lesson.dateSource.label.lowercased())", tone: .neutral)
             }
-            .font(.callout).foregroundStyle(.secondary)
-            Text("Room: \(model.rooms.name(for: lesson.roomId) ?? lesson.roomName) · date from \(lesson.dateSource.label)").font(.caption).foregroundStyle(.secondary)
             if let orig = lesson.reprocessOf, model.lesson(orig) != nil {
-                Button("Reprocessed from an earlier lesson — show original") { model.selectedLessonId = orig }.buttonStyle(.link)
+                Button("Reprocessed from an earlier lesson — show original") { model.selectedLessonId = orig }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.sageInk)
             }
             ViewThatFits(in: .horizontal) {
-                HStack { headerButtons }
-                VStack(alignment: .leading, spacing: 6) { headerButtons }
+                HStack(spacing: 8) { headerButtons }
+                VStack(alignment: .leading, spacing: 8) { headerButtons }
             }
-            .padding(.top, 4)
+            .padding(.top, 2)
         }
     }
 
     @ViewBuilder var headerButtons: some View {
-        Link(destination: AppInfo.adminToolsURL) { Label("Open Admin Tools", systemImage: "safari") }.fixedSize()
-        Button { confirmReprocess = true } label: { Label("Reprocess Anyway", systemImage: "arrow.triangle.2.circlepath") }.fixedSize()
-        Button(role: .destructive) { confirmDelete = true } label: { Label("Delete Local Data", systemImage: "trash") }.fixedSize()
+        Link(destination: AppInfo.adminToolsURL) { Label("Open Admin Tools", systemImage: "arrow.up.right.square") }
+            .buttonStyle(.primary).fixedSize()
+        Button { confirmReprocess = true } label: { Label("Reprocess Anyway", systemImage: "arrow.triangle.2.circlepath") }
+            .buttonStyle(.soft).fixedSize()
+        Button(role: .destructive) { confirmDelete = true } label: { Label("Delete Local Data", systemImage: "trash") }
+            .buttonStyle(.soft).fixedSize()
     }
 
     var recordings: some View {
-        Card(title: "Recordings", systemImage: "film") {
+        Card(title: "Recordings", systemImage: "film", tone: .lavender) {
             ForEach(lesson.recordings) { r in
                 HStack {
                     VStack(alignment: .leading) {
@@ -285,8 +299,8 @@ struct LessonDetailView: View {
                             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     Spacer()
-                    Button("Preview") { openPreview(r) }
-                    Button("Show in Finder") { reveal(r) }
+                    Button("Preview") { openPreview(r) }.buttonStyle(.softCompact)
+                    Button("Show in Finder") { reveal(r) }.buttonStyle(.softCompact)
                 }
             }
         }
@@ -325,7 +339,7 @@ struct JobSection: View {
             HStack {
                 StatusChip(job: job)
                 if job.stage.isActive, let p = model.progress[job.id] {
-                    ProgressView(value: p.fraction).frame(width: 140)
+                    SoftBar(value: p.fraction).frame(width: 140)
                     Text(p.message).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

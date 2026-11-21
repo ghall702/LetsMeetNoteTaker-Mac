@@ -247,10 +247,10 @@ struct VideoProgressRow: View {
                 if let size = v?.fileSize { Text("· \(ByteFormat.string(size, unit: model.settings.video.byteUnit))").font(.caption).foregroundStyle(.secondary) }
             }
             if let p, let phase, [.uploading, .merging, .verifying, .readyToUpload, .preparing].contains(phase) {
-                ProgressView(value: min(1, max(0, p.fraction)))
+                SoftBar(value: min(1, max(0, p.fraction)))
                 Text(detail(p, phase: phase)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             } else {
-                ProgressView(value: 0).opacity(0.4)
+                SoftBar(value: 0).opacity(0.4)
                 Text(waitingText(v)).font(.caption).foregroundStyle(.secondary)
             }
         }
