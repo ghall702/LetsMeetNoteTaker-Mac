@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="128" alt="Lesson Notes app icon">
+<img src="docs/images/icon.png" width="128" alt="Lesson Notes app icon: a page with a sprig">
 
 # LetsMeet Lesson Notes
 
@@ -9,15 +9,17 @@
 A native macOS menu-bar app for George Hall Tuition. It finds new Zoom recordings, transcribes them on-device,
 writes structured revision notes with OpenAI and sends them to LetsMeet, where they wait for approval.
 
-[![Download for Mac](https://img.shields.io/badge/Download-macOS%20DMG-0A84FF?style=for-the-badge&logo=apple&logoColor=white)](../../releases)
+[![Download for Mac](https://img.shields.io/badge/Download-macOS%20DMG-2F4135?style=for-the-badge&logo=apple&logoColor=white)](../../releases)
 &nbsp;
-![macOS 14+](https://img.shields.io/badge/macOS-14%20Sonoma%2B-555?style=for-the-badge)
-![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native-555?style=for-the-badge)
-![Swift](https://img.shields.io/badge/Swift-SwiftUI-F05138?style=for-the-badge&logo=swift&logoColor=white)
+![Version 2.0](https://img.shields.io/badge/version-2.0-9FB096?style=for-the-badge)
+![macOS 14+](https://img.shields.io/badge/macOS-14%20Sonoma%2B-5F6B64?style=for-the-badge)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-native-5F6B64?style=for-the-badge)
 
 <br>
 
-<img src="docs/images/dashboard-light.jpg" width="900" alt="Dashboard showing new recordings to review and lessons being processed">
+<img src="docs/images/dashboard-light.jpg" width="900" alt="Dashboard: greeting, a panel of new lessons to confirm, counts for transcribing, writing notes and sent today, and the lessons in progress">
+
+<sub>New in 2.0: a calmer, botanical look · <a href="CHANGELOG.md">version history</a> · <a href="docs/versions/v1.10/README.md">how 1.10 looked</a></sub>
 
 </div>
 
@@ -26,10 +28,12 @@ writes structured revision notes with OpenAI and sends them to LetsMeet, where t
 ## Contents
 
 - [How it works](#how-it-works)
+- [Confirming a lesson](#confirming-a-lesson)
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Install](#install)
 - [Privacy & safeguarding](#privacy--safeguarding)
+- [Version history](#version-history)
 - [For developers](#for-developers)
 
 ## How it works
@@ -47,6 +51,21 @@ flowchart LR
 
 Once you press **Confirm**, everything else is automatic — extraction, transcription, notes, upload and status tracking.
 Transcription happens on the Mac; lesson videos go only to your own media server, attached to the approved note.
+
+## Confirming a lesson
+
+When Zoom finishes converting, a notification offers **Review**. The Confirm screen opens full-window:
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/confirm-light.jpg" alt="Confirm screen before any files are added"><br><sub><b>1 · Check who and when</b> — pupil, date and time sit under the title; the recordings are listed in order. Drop lesson files on the right.</sub></td>
+<td width="50%"><img src="docs/images/confirm-files.jpg" alt="Confirm screen with lesson files added as cards"><br><sub><b>2 · Add lesson files</b> — for each file, say what it is (colour-coded), and whether the AI reads it and the pupil gets it.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/confirm-mp4.jpg" alt="Confirm screen with an extra MP4 added as Part 3"><br><sub><b>3 · Add another recording</b> — drop an MP4 (or M4A) onto the recordings, or choose one. It joins as the next part; drag to reorder, and pick Combine or Separate.</sub></td>
+<td valign="middle"><b>4 · Confirm & process</b><br><br>The line at the bottom sums it up (or says what is still needed). Press <b>Confirm & process</b> and the lesson slides onto the Dashboard: transcribed on the Mac, notes written, sent to LetsMeet to wait for your approval. A notification tells you when it's there.</td>
+</tr>
+</table>
 
 ## Features
 
@@ -120,19 +139,16 @@ Transcription happens on the Mac; lesson videos go only to your own media server
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/review-light.jpg" alt="Confirm lesson sheet"><br><sub><b>Confirm a lesson</b> — suggested pupil, date, recordings with previews and processing mode</sub></td>
-<td width="50%"><img src="docs/images/regenerate-light.jpg" alt="Regenerate notes comparison"><br><sub><b>Regenerate & compare</b> — new version side by side, changes highlighted</sub></td>
+<td width="50%"><img src="docs/images/history-light.jpg" alt="History"><br><sub><b>History</b> — every lesson with its website status; search by pupil, date, title or transcript</sub></td>
+<td width="50%"><img src="docs/images/videos-light.jpg" alt="Lesson videos"><br><sub><b>Lesson videos</b> — media-server storage, video counts, bandwidth and uploads</sub></td>
 </tr>
 <tr>
-<td><img src="docs/images/history-light.jpg" alt="History"><br><sub><b>History</b> — searchable by pupil, date, title or transcript, with website status</sub></td>
 <td><img src="docs/images/students-light.jpg" alt="Students"><br><sub><b>Students</b> — room mapping, matching rules and per-pupil prompts</sub></td>
+<td><img src="docs/images/usage-light.jpg" alt="API usage"><br><sub><b>API usage</b> — today's tokens against the free allowance, estimated spend</sub></td>
 </tr>
 <tr>
-<td><img src="docs/images/settings-light.jpg" alt="OpenAI settings"><br><sub><b>OpenAI</b> — live model list, Test Model and reasoning effort</sub></td>
+<td><img src="docs/images/settings-light.jpg" alt="Settings"><br><sub><b>Settings</b> — OpenAI model list, Test Model, transcription and videos</sub></td>
 <td><img src="docs/images/dashboard-dark.jpg" alt="Dark mode"><br><sub><b>Dark mode</b> — follows your Mac's appearance</sub></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><img src="docs/images/usage-light.jpg" width="70%" alt="API usage"><br><sub><b>API Usage</b> — today's tokens against the complimentary allowance, reset countdown, estimated spend and the lessons using the most</sub></td>
 </tr>
 </table>
 
@@ -163,6 +179,11 @@ Transcription happens on the Mac; lesson videos go only to your own media server
 | 📊 Analytics | None. Transcripts, notes and keys are never logged. |
 
 Local transcripts follow your retention setting (forever, 1 year, 90 or 30 days) and can be deleted from History at any time.
+
+## Version history
+
+Every version is listed in **[CHANGELOG.md](CHANGELOG.md)** with a DMG download, so an older version can always be
+reinstalled (your data is kept). The 1.x look is archived in [docs/versions/v1.10](docs/versions/v1.10/README.md).
 
 ## For developers
 
