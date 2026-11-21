@@ -530,7 +530,7 @@ struct ConfirmationScreen: View {
 
     func load() async {
         rows = session.recordings.map { RecordingRow(rec: $0) }
-        if rows.count == 1 { selection = [rows[0].id] }
+        selection = Set(rows.map(\.id))
         let inferred = session.inferredDate
         if let d = CoreFormat.parseLessonDate(inferred.lessonDate, timeZone: tz) { lessonDate = d }
         if let s = inferred.startedAt { hasStartTime = true; startTime = s; lessonDate = s }
