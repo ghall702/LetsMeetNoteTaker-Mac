@@ -348,7 +348,7 @@ struct ConfirmationScreen: View {
             .layoutPriority(1)
             Spacer(minLength: 4)
             if let part, selectedRows.count > 1 {
-                Pill(text: "Part \(part)", tone: row.addedByUser ? .sage : .neutral)
+                Pill(text: "Part \(part)", tone: row.addedByUser ? .sage : .neutral).fixedSize()
             }
             if row.addedByUser {
                 Button { removeRecording(row) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
@@ -549,6 +549,7 @@ struct ConfirmationScreen: View {
                     Text(model.settings.autoProcessAfterConfirm ? "Confirm & process" : "Confirm")
                     Image(systemName: "arrow.right")
                 }
+                .fixedSize()
             }
             .buttonStyle(.primaryLarge)
             .keyboardShortcut(.defaultAction)
@@ -858,9 +859,9 @@ struct FileCard: View {
             RoleSegments(role: $file.role)
                 .disabled(!file.includeInContext)
                 .opacity(file.includeInContext ? 1 : 0.5)
-            HStack(spacing: 8) {
-                UseToggle(isOn: $file.includeInContext, title: "AI reads it", detail: "for the notes")
-                UseToggle(isOn: $file.shareWithPupil, title: "Pupil gets it", detail: "as a download")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { useToggles }
+                VStack(spacing: 6) { useToggles }
             }
             .padding(.top, 10)
             if let note = statusNote {
@@ -874,6 +875,11 @@ struct FileCard: View {
         .hoverLift()
         .animation(Theme.spring, value: file.includeInContext)
         .animation(Theme.spring, value: file.shareWithPupil)
+    }
+
+    @ViewBuilder var useToggles: some View {
+        UseToggle(isOn: $file.includeInContext, title: "AI reads it", detail: "for the notes")
+        UseToggle(isOn: $file.shareWithPupil, title: "Pupil gets it", detail: "as a download")
     }
 
     var statusNote: String? {
@@ -944,7 +950,7 @@ struct UseToggle: View {
                     Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
                     Text(detail).font(.system(size: 11)).foregroundStyle(Theme.ink2)
                 }
-                .lineLimit(1)
+                .fixedSize()
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9).padding(.vertical, 7)
