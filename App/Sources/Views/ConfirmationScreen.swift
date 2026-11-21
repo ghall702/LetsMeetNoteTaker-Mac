@@ -228,7 +228,7 @@ struct ConfirmationScreen: View {
                 Avatar(name: o.name, size: 32)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(o.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(suggestion == nil ? o.roomName : "Suggested · \(suggestion!.reason)")
+                    Text(suggestion.map { "Suggested · " + $0.reason } ?? o.roomName)
                         .font(.system(size: 11)).foregroundStyle(Theme.ink3).lineLimit(2)
                 }
                 Spacer(minLength: 0)
@@ -341,7 +341,7 @@ struct ConfirmationScreen: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.rec.filename).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
                     .lineLimit(1).truncationMode(.middle)
-                Text((row.addedByUser ? "Added by you · " : "") + detail(row.rec))
+                Text(rowDetail(row))
                     .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).lineLimit(1)
             }
             Spacer(minLength: 4)
@@ -374,10 +374,7 @@ struct ConfirmationScreen: View {
                         Text("Read from where it is. Nothing is moved.").font(.system(size: 11.5)).foregroundStyle(Theme.ink2)
                     }
                 } else {
-                    (Text("Add a recording").fontWeight(.semibold).foregroundColor(Theme.ink)
-                     + Text(" · drop an MP4 here, or ").foregroundColor(Theme.ink2)
-                     + Text("choose…").underline().foregroundColor(Theme.ink2))
-                        .font(.system(size: 12.5))
+                    addRecordingLabel.font(.system(size: 12.5))
                 }
                 Spacer()
                 if !recordingDropTargeted { Text("MP4 · M4A").font(.system(size: 11)).foregroundStyle(Theme.ink3) }
@@ -386,11 +383,24 @@ struct ConfirmationScreen: View {
             .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(recordingDropTargeted ? Theme.sageTint : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(recordingDropTargeted ? Theme.forest : Theme.sage.opacity(0.7),
-                              style: StrokeStyle(lineWidth: 1.5, dash: recordingDropTargeted ? [] : [5, 4])))
+                              style: dropStroke(recordingDropTargeted)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Add a recording")
+    }
+
+    /// Dashed outline for a drop zone; solid while something is dragged over it.
+    func dropStroke(_ active: Bool) -> StrokeStyle {
+        let dash: [CGFloat] = active ? [] : [6, 5]
+        return StrokeStyle(lineWidth: 1.5, dash: dash)
+    }
+
+    var addRecordingLabel: Text {
+        let a: Text = Text("Add a recording").fontWeight(.semibold).foregroundColor(Theme.ink)
+        let b: Text = Text(" · drop an MP4 here, or ").foregroundColor(Theme.ink2)
+        let c: Text = Text("choose…").underline().foregroundColor(Theme.ink2)
+        return a + b + c
     }
 
     func modeCard(_ m: ProcessingMode, title: String, detail: String) -> some View {
@@ -490,7 +500,7 @@ struct ConfirmationScreen: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(filesDropTargeted ? Theme.sageTint : Theme.raised.opacity(0.35)))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .strokeBorder(filesDropTargeted ? Theme.forest : Theme.sage.opacity(0.7),
-                          style: StrokeStyle(lineWidth: 1.5, dash: filesDropTargeted ? [] : [6, 5])))
+                          style: dropStroke(filesDropTargeted)))
     }
 
     var smallDropZone: some View {
@@ -506,7 +516,7 @@ struct ConfirmationScreen: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(filesDropTargeted ? Theme.sageTint : Color.clear))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(filesDropTargeted ? Theme.forest : Theme.sage.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: filesDropTargeted ? [] : [6, 5])))
+            .strokeBorder(filesDropTargeted ? Theme.forest : Theme.sage.opacity(0.7), style: dropStroke(filesDropTargeted)))
     }
 
     // MARK: Action bar
@@ -580,6 +590,11 @@ struct ConfirmationScreen: View {
     var canConfirm: Bool { confirmHint == nil }
 
     // MARK: Data
+
+    func rowDetail(_ row: RecordingRow) -> String {
+        let prefix: String = row.addedByUser ? "Added by you · " : ""
+        return prefix + detail(row.rec)
+    }
 
     func detail(_ r: ScannedRecording) -> String {
         var parts: [String] = []
@@ -926,8 +941,7 @@ struct UseToggle: View {
                     Circle().fill(.white).frame(width: 14, height: 14).padding(2)
                         .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
                 }
-                (Text(title).fontWeight(.semibold).foregroundColor(Theme.ink) + Text(" · \(detail)").foregroundColor(Theme.ink2))
-                    .font(.system(size: 12)).lineLimit(1).minimumScaleFactor(0.85)
+                label.font(.system(size: 12)).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9).padding(.vertical, 7)
@@ -938,5 +952,11 @@ struct UseToggle: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(title) \(detail)")
         .accessibilityValue(isOn ? "On" : "Off")
+    }
+
+    var label: Text {
+        let a: Text = Text(title).fontWeight(.semibold).foregroundColor(Theme.ink)
+        let b: Text = Text(" · " + detail).foregroundColor(Theme.ink2)
+        return a + b
     }
 }

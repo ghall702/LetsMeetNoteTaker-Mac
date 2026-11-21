@@ -262,8 +262,7 @@ struct LessonDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
             FlowPills {
                 ForEach(lesson.jobs) { StatusChip(job: $0) }
-                Pill(text: CoreFormat.longUKDate(lesson.lessonDate) + (lesson.startedAt.map { " · " + $0.formatted(date: .omitted, time: .shortened) } ?? ""),
-                     tone: .neutral, icon: "calendar")
+                Pill(text: dateLine, tone: .neutral, icon: "calendar")
                 Pill(text: lesson.mode.label, tone: .neutral, icon: "square.stack")
                 Pill(text: "Date from \(lesson.dateSource.label.lowercased())", tone: .neutral)
             }
@@ -277,6 +276,12 @@ struct LessonDetailView: View {
             }
             .padding(.top, 2)
         }
+    }
+
+    var dateLine: String {
+        var s: String = CoreFormat.longUKDate(lesson.lessonDate)
+        if let t = lesson.startedAt { s += " · " + t.formatted(date: .omitted, time: .shortened) }
+        return s
     }
 
     @ViewBuilder var headerButtons: some View {

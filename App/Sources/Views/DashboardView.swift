@@ -441,7 +441,6 @@ struct QueueRow: View {
                             Circle()
                                 .fill(s.1 == 0 ? Theme.line : (s.1 == 1 ? Theme.forest : Theme.sage))
                                 .frame(width: 7, height: 7)
-                                .overlay(Circle().strokeBorder(Theme.sageTint, lineWidth: s.1 == 1 ? 0 : 0))
                             Text(s.0).font(.system(size: 11.5)).foregroundStyle(s.1 == 1 ? Theme.ink2 : Theme.ink3)
                         }
                     }
@@ -497,7 +496,7 @@ struct AttentionItem: View {
                 .background(Circle().fill(Theme.raised.opacity(0.7)))
             VStack(alignment: .leading, spacing: 4) {
                 Text(title(j)).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.clayInk)
-                Text("\(l.pupilName) · \(CoreFormat.longUKDate(l.lessonDate)). " + (j.error?.message ?? j.replacement?.message ?? j.fileUpdate?.message ?? ""))
+                Text(detail(l, j))
                     .font(.system(size: 12)).foregroundStyle(Theme.clayInk.opacity(0.85)).lineLimit(3).textSelection(.enabled)
                 HStack(spacing: 8) {
                     if j.stage == .failed && j.error?.kind != .payloadTooLarge {
@@ -514,6 +513,12 @@ struct AttentionItem: View {
         .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.clay))
+    }
+
+    func detail(_ l: Lesson, _ j: Job) -> String {
+        let who: String = l.pupilName + " · " + CoreFormat.longUKDate(l.lessonDate) + ". "
+        let message: String = j.error?.message ?? j.replacement?.message ?? j.fileUpdate?.message ?? ""
+        return who + message
     }
 
     func title(_ j: Job) -> String {
