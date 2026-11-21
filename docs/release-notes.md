@@ -13,7 +13,7 @@
 - **Redesigned throughout:** a calm botanical look with soft cards, a serif for headings and gentle animations as things arrive, move and finish.
 - **New logo and menu-bar icon:** a page with a sprig. The menu-bar icon is wide, follows light and dark menu bars, shows a dot while lessons are processing and an exclamation mark when one needs you.
 - **Dashboard:** a greeting, a "ready for you" panel for new lessons, counts for transcribing / writing notes / sent today, an "In progress" list showing each lesson's step, and side cards for OpenAI today, what needs you and lesson videos.
-- **Confirm screen:** now a full window instead of a small sheet. Pick the pupil from cards, check the date, order the recordings, and add lesson files as cards with clear "What is it?" and "AI reads it / Pupil gets it" switches.
+- **Confirm screen:** now a full window instead of a small sheet, kept calm: pupil, date and time as dropdowns under the title, recordings as a simple list with a Combine / Separate switch, and lesson files with a colour-coded "What is it?" and "AI reads it / Pupil gets it" switches.
 - **Drag and drop MP4s:** drop an extra MP4 or M4A onto the recordings (or choose one) to add it as another part of the lesson. It is read from where it is and can be reordered or removed.
 - After you confirm, a message slides up to say the lesson is on its way.
 - The version history is in CHANGELOG.md, with a download for every earlier version.

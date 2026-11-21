@@ -185,6 +185,7 @@ struct DashboardView: View {
     var inProgressCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
+                IconBadge(systemName: "waveform", tone: .sage, size: 30)
                 Text("In progress").font(Theme.serif(22)).foregroundStyle(Theme.ink)
                 Spacer()
                 Button("View all") { model.sidebar = .history }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.ink3)
@@ -229,7 +230,11 @@ struct DashboardView: View {
         let recent = model.allJobs.filter { $0.job.stage == .submitted }
             .sorted { ($0.job.submittedAt ?? .distantPast) > ($1.job.submittedAt ?? .distantPast) }.prefix(6)
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Recently sent").font(Theme.serif(22)).foregroundStyle(Theme.ink).padding(.bottom, 4)
+            HStack(spacing: 10) {
+                IconBadge(systemName: "paperplane", tone: .lavender, size: 30)
+                Text("Recently sent").font(Theme.serif(22)).foregroundStyle(Theme.ink)
+            }
+            .padding(.bottom, 4)
             if recent.isEmpty { Text("No lesson notes sent yet.").font(.system(size: 13)).foregroundStyle(Theme.ink2) }
             ForEach(Array(recent)) { item in
                 let l = item.lesson, j = item.job
@@ -296,6 +301,7 @@ struct DashboardView: View {
     var needsYouCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                IconBadge(systemName: "hand.raised", tone: .clay, size: 30)
                 Text("Needs you").font(Theme.serif(20)).foregroundStyle(Theme.ink)
                 Spacer()
                 if !model.attentionJobs.isEmpty {
@@ -335,6 +341,7 @@ struct DashboardView: View {
     var videosCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                IconBadge(systemName: "play.rectangle", tone: .sand, size: 30)
                 Text("Lesson videos").font(Theme.serif(20)).foregroundStyle(Theme.ink)
                 Spacer()
                 Button("Open Videos") { model.sidebar = .videos }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.ink3)
@@ -543,6 +550,7 @@ struct OpenAIRingCard: View {
             let tone: Theme.Tone = fraction >= 0.9 ? .clay : (fraction >= 0.7 ? .sand : .sage)
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
+                    IconBadge(systemName: "sparkles", tone: .lavender, size: 30)
                     Text("OpenAI today").font(Theme.serif(20)).foregroundStyle(Theme.ink)
                     Spacer()
                     Pill(text: fraction >= 1 ? "Over allowance" : (fraction >= 0.7 ? "Approaching limit" : "Within allowance"), tone: tone)

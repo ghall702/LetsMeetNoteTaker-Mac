@@ -83,28 +83,25 @@ struct ConfirmationScreen: View {
         return model.store.mapping(id: o.mappingId)?.displayName ?? o.name
     }
 
+    @State private var showDatePicker = false
+    @State private var showTimePicker = false
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    topBar.appearIn(0)
-                    ScreenTitle(title: pupilName.map { "Confirm \($0)'s lesson" } ?? "Confirm lesson",
-                                subtitle: "Check the details, add any lesson files, then the app does the rest — transcribe, write the notes and send them to LetsMeet.")
-                        .appearIn(1)
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(spacing: 16) {
-                            whoCard.appearIn(2)
-                            recordingsCard.appearIn(3)
-                        }
-                        .frame(maxWidth: .infinity)
-                        filesCard
-                            .frame(maxWidth: .infinity)
-                            .appearIn(4)
+                VStack(alignment: .leading, spacing: 0) {
+                    backLink.appearIn(0)
+                    hero.padding(.top, 10).appearIn(1)
+                    HStack(alignment: .top, spacing: 40) {
+                        recordingsSection.frame(maxWidth: .infinity, alignment: .topLeading).appearIn(2)
+                        filesSection.frame(maxWidth: .infinity, alignment: .topLeading).appearIn(3)
                     }
+                    .padding(.top, 28)
                 }
-                .padding(.horizontal, 26)
+                .padding(.horizontal, 34)
                 .padding(.top, 18)
-                .padding(.bottom, 20)
+                .padding(.bottom, 24)
             }
             actionBar
         }
@@ -131,154 +128,168 @@ struct ConfirmationScreen: View {
         withAnimation(Theme.spring) { model.reviewRequest = nil }
     }
 
-    // MARK: Top
+    // MARK: Header
 
-    var topBar: some View {
-        HStack(spacing: 8) {
-            Button { close() } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text("Dashboard")
-                }
-                .font(.system(size: 13)).foregroundStyle(Theme.ink2)
+    var backLink: some View {
+        Button { close() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                Text(onClose == nil ? "Dashboard" : "Back to import")
             }
-            .buttonStyle(.plain)
-            Text("/ New lesson").font(.system(size: 13)).foregroundStyle(Theme.ink3)
-            Spacer()
-            if request.fromDetection { Pill(text: "Zoom has finished converting", tone: .sage, dot: true) }
-        }
-    }
-
-    // MARK: Who and when
-
-    /// Pupil cards: the suggestions first, then whoever is currently chosen.
-    var pupilCards: [StudentOption] {
-        var out: [StudentOption] = []
-        for s in suggestions {
-            let id = s.mappingId.map { "m:\($0)" } ?? "r:\(s.roomId)"
-            if let o = options.first(where: { $0.id == id }), !out.contains(o) { out.append(o) }
-            if out.count == 2 { break }
-        }
-        if let sel = selectedOption, !out.contains(sel) {
-            if out.count == 2 { out[1] = sel } else { out.append(sel) }
-        }
-        return out
-    }
-
-    var whoCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Who and when").eyebrow()
-            HStack(spacing: 9) {
-                ForEach(pupilCards) { o in pupilCard(o) }
-                ZStack {
-                    RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.raised.opacity(0.6))
-                    RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.line, lineWidth: 1.5)
-                    Menu {
-                        ForEach(options) { o in Button(o.title) { withAnimation(Theme.spring) { studentId = o.id } } }
-                    } label: {
-                        Text(pupilCards.isEmpty ? "Choose a pupil…" : "Other…")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .font(.system(size: 12.5))
-                }
-                .frame(maxWidth: pupilCards.isEmpty ? .infinity : 110)
-                .frame(height: 54)
-                .disabled(options.isEmpty)
-            }
-            if options.isEmpty {
-                Label("No rooms loaded. Add your website key in Settings and refresh rooms.", systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12)).foregroundStyle(Theme.clayInk)
-            }
-            HStack(spacing: 9) {
-                field("Date") {
-                    DatePicker("", selection: $lessonDate, displayedComponents: .date).labelsHidden().datePickerStyle(.field)
-                }
-                field("Started") {
-                    HStack(spacing: 6) {
-                        if hasStartTime {
-                            DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute).labelsHidden().datePickerStyle(.field)
-                        }
-                        Toggle(hasStartTime ? "" : "Known", isOn: $hasStartTime.animation(Theme.spring))
-                            .toggleStyle(.checkbox).font(.system(size: 12))
-                    }
-                }
-                .frame(maxWidth: 190)
-                field("From") {
-                    Text(session.inferredDate.source.label).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                }
-            }
-            ForEach(session.inferredDate.notes, id: \.self) {
-                Label($0, systemImage: "info.circle").font(.system(size: 11.5)).foregroundStyle(Theme.sandInk)
-            }
-            if session.inferredDate.needsReview {
-                Toggle("I have checked the date", isOn: $dateChecked).toggleStyle(.checkbox).font(.system(size: 12.5))
-            }
-            Toggle("Remember this pupil for “\(session.zoomInfo?.topic ?? session.topic)”", isOn: $remember)
-                .toggleStyle(.checkbox).font(.system(size: 12)).foregroundStyle(Theme.ink2)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(padding: 18)
-    }
-
-    func pupilCard(_ o: StudentOption) -> some View {
-        let on = o.id == studentId
-        let suggestion = suggestions.first { ($0.mappingId.map { "m:\($0)" } ?? "r:\($0.roomId)") == o.id }
-        return Button { withAnimation(Theme.spring) { studentId = o.id } } label: {
-            HStack(spacing: 9) {
-                Avatar(name: o.name, size: 32)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(o.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(suggestion.map { "Suggested · " + $0.reason } ?? o.roomName)
-                        .font(.system(size: 11)).foregroundStyle(Theme.ink3).lineLimit(2)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 11).padding(.vertical, 9)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(on ? Theme.raised : Theme.raised.opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(on ? Theme.forest : Theme.line, lineWidth: 1.5))
-            .shadow(color: Theme.forest.opacity(on ? 0.12 : 0), radius: 6)
-            .contentShape(Rectangle())
+            .font(.system(size: 13)).foregroundStyle(Theme.ink3)
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    func field<C: View>(_ label: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.system(size: 10.5)).foregroundStyle(Theme.ink3)
-            content()
+    var heroGradient: LinearGradient {
+        LinearGradient(colors: [Color(light: 0xF3E7D6, dark: 0x3A3226), Theme.sand, Theme.sageTint],
+                       startPoint: .leading, endPoint: .trailing)
+    }
+
+    var hero: some View {
+        ZStack(alignment: .leading) {
+            heroGradient
+            HillsArt(dark: colorScheme == .dark)
+                .frame(width: 380)
+                .mask(LinearGradient(colors: [.clear, .black, .black], startPoint: .leading, endPoint: .trailing))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(request.fromDetection ? "New lesson · Zoom has finished converting" : "New lesson")
+                    .font(.system(size: 10.5, weight: .semibold)).tracking(1.6).textCase(.uppercase)
+                    .foregroundStyle(Theme.sandInk)
+                Text(pupilName.map { "Confirm \($0)'s lesson" } ?? "Confirm lesson")
+                    .font(Theme.serif(34)).foregroundStyle(Theme.ink)
+                HStack(spacing: 8) {
+                    pupilChip
+                    dateChip
+                    timeChip
+                }
+                .padding(.top, 4)
+                ForEach(session.inferredDate.notes, id: \.self) {
+                    Label($0, systemImage: "info.circle").font(.system(size: 11.5)).foregroundStyle(Theme.sandInk)
+                }
+                if session.inferredDate.needsReview {
+                    Toggle("I've checked the date", isOn: $dateChecked).toggleStyle(.checkbox).font(.system(size: 12.5))
+                }
+                if options.isEmpty {
+                    Label("No rooms loaded. Add your website key in Settings and refresh rooms.", systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12)).foregroundStyle(Theme.clayInk)
+                }
+            }
+            .padding(.horizontal, 26).padding(.vertical, 20)
         }
-        .padding(.horizontal, 11).padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Theme.raised.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Theme.line2))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    func chipBackground(_ tone: Theme.Tone) -> some View {
+        Capsule().fill(Theme.raised.opacity(0.6))
+            .overlay(Capsule().fill(tone.fill.opacity(0.55)))
+            .overlay(Capsule().strokeBorder(tone.ink.opacity(0.22)))
+    }
+
+    var pupilChip: some View {
+        HStack(spacing: 7) {
+            if let name = pupilName { Avatar(name: name, size: 20) }
+            Menu {
+                if !suggestions.isEmpty {
+                    Section("Suggested") {
+                        ForEach(suggestions.prefix(3)) { s in
+                            let id = s.mappingId.map { "m:\($0)" } ?? "r:\(s.roomId)"
+                            Button("\(s.displayName) — \(s.reason)") { withAnimation(Theme.spring) { studentId = id } }
+                        }
+                    }
+                }
+                Section("All pupils") {
+                    ForEach(options) { o in Button(o.title) { withAnimation(Theme.spring) { studentId = o.id } } }
+                }
+                Divider()
+                Toggle("Remember for “\(session.zoomInfo?.topic ?? session.topic)”", isOn: $remember)
+            } label: {
+                Text(pupilName ?? "Choose a pupil")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(options.isEmpty)
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.leading, pupilName == nil ? 12 : 6).padding(.trailing, 10).padding(.vertical, 6)
+        .background(chipBackground(.clay))
+    }
+
+    var dateChip: some View {
+        Button { showDatePicker = true } label: {
+            HStack(spacing: 6) {
+                Text(lessonDate.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.ink3)
+            }
+            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(chipBackground(.sand))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showDatePicker, arrowEdge: .bottom) {
+            DatePicker("Lesson date", selection: $lessonDate, displayedComponents: .date)
+                .datePickerStyle(.graphical).labelsHidden().padding(14)
+        }
+    }
+
+    var timeChip: some View {
+        Button { showTimePicker = true } label: {
+            HStack(spacing: 6) {
+                Text(hasStartTime ? startTime.formatted(date: .omitted, time: .shortened) : "Add start time")
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.ink3)
+            }
+            .font(.system(size: 13, weight: .semibold)).foregroundStyle(hasStartTime ? Theme.ink : Theme.ink2)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(chipBackground(.lavender))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showTimePicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Start time known", isOn: $hasStartTime.animation(Theme.spring)).toggleStyle(.checkbox)
+                if hasStartTime {
+                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.field)
+                }
+            }
+            .padding(14)
+            .frame(width: 220, alignment: .leading)
+        }
+    }
+
+    func sectionHeader(_ title: String, icon: String, tone: Theme.Tone) -> some View {
+        HStack(spacing: 10) {
+            IconBadge(systemName: icon, tone: tone, size: 30)
+            Text(title).font(Theme.serif(21)).foregroundStyle(Theme.ink)
+        }
     }
 
     // MARK: Recordings
 
-    var recordingsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    var recordingsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Recordings").eyebrow()
+                sectionHeader("Recordings", icon: "video", tone: .sand)
                 Spacer()
-                if rows.count > 1 {
-                    Text("Drag to reorder · \(selection.count) of \(rows.count) included").font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                }
+                if selectedRows.count > 1 { ModeSwitch(mode: $mode).transition(.opacity) }
             }
-            VStack(spacing: 8) {
-                ForEach(rows) { row in
+            .padding(.bottom, 6)
+            ForEach(rows) { row in
+                VStack(spacing: 0) {
                     recordingRow(row)
-                        .transition(.asymmetric(insertion: .scale(scale: 0.96).combined(with: .opacity), removal: .opacity))
-                        .onDrag {
-                            draggingRow = row.id
-                            return NSItemProvider(object: row.id as NSString)
-                        }
-                        .onDrop(of: [UTType.plainText], delegate: RecordingReorderDelegate(target: row.id, rows: $rows, dragging: $draggingRow))
+                    Divider().overlay(Theme.line2)
                 }
+                .transition(.asymmetric(insertion: .scale(scale: 0.97).combined(with: .opacity), removal: .opacity))
+                .onDrag {
+                    draggingRow = row.id
+                    return NSItemProvider(object: row.id as NSString)
+                }
+                .onDrop(of: [UTType.plainText], delegate: RecordingReorderDelegate(target: row.id, rows: $rows, dragging: $draggingRow))
             }
-            addRecordingZone
+            addLine(recordingDropTargeted ? "Release to add as Part \(selectedRows.count + 1)" : "Add a recording — or drop an MP4 here",
+                    tone: .sand, active: recordingDropTargeted) { addRecordings(chooseRecordings()) }
             if let recordingError {
                 Label(recordingError, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(Theme.clayInk)
             }
@@ -286,18 +297,10 @@ struct ConfirmationScreen: View {
                 Text("Zoom's separate audio-only file was left out because a video recording exists.")
                     .font(.system(size: 11)).foregroundStyle(Theme.ink3)
             }
-            if selectedRows.count > 1 {
-                HStack(spacing: 9) {
-                    modeCard(.combined, title: "Combine into one lesson", detail: "One set of notes, one joined video.")
-                    modeCard(.separate, title: "Keep separate", detail: "A note and a video for each.")
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(padding: 18)
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .strokeBorder(Theme.forest.opacity(recordingDropTargeted ? 0.35 : 0), lineWidth: 3))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.sand.opacity(recordingDropTargeted ? 0.6 : 0)))
+        .padding(-12)
         .onDrop(of: [UTType.fileURL], isTargeted: $recordingDropTargeted.animation(Theme.spring)) { providers in
             loadURLs(providers) { addRecordings($0) }
             return true
@@ -306,49 +309,33 @@ struct ConfirmationScreen: View {
         .animation(Theme.spring, value: selectedRows.count > 1)
     }
 
+    static let partTones: [Theme.Tone] = [.sage, .sand, .clay, .lavender]
+
     func recordingRow(_ row: RecordingRow) -> some View {
         let included = selection.contains(row.id)
-        let part = selectedRows.firstIndex { $0.id == row.id }.map { $0 + 1 }
-        return HStack(spacing: 11) {
-            Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                .help("Drag to reorder")
-            Toggle("", isOn: Binding(get: { included }, set: { on in
-                withAnimation(Theme.spring) { if on { selection.insert(row.id) } else { selection.remove(row.id) } }
-            }))
-            .toggleStyle(.checkbox).labelsHidden()
-            .accessibilityLabel("Include \(row.rec.filename)")
-            Button { previewItem = row } label: {
-                ZStack {
-                    if let t = row.thumbnail { Image(nsImage: t).resizable().aspectRatio(contentMode: .fill) }
-                    else { HillsArt(sun: false).opacity(0.7) }
-                    Image(systemName: "play.fill").font(.system(size: 12)).foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.3), radius: 3)
-                    if let d = row.rec.durationSeconds {
-                        Text(CoreFormat.duration(Int(d)))
-                            .font(.system(size: 9.5, weight: .semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.45)))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                            .padding(4)
-                    }
-                }
-                .frame(width: 84, height: 50)
-                .background(Color(nsColor: NSColor(hex: 0x2B2E2B)))
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        let part = selectedRows.firstIndex { $0.id == row.id }
+        return HStack(spacing: 13) {
+            if rows.count > 1 {
+                Toggle("", isOn: Binding(get: { included }, set: { on in
+                    withAnimation(Theme.spring) { if on { selection.insert(row.id) } else { selection.remove(row.id) } }
+                }))
+                .toggleStyle(.checkbox).labelsHidden()
+                .help(included ? "Included — untick to leave this recording out" : "Left out — tick to include")
+                .accessibilityLabel("Include \(row.rec.filename)")
             }
-            .buttonStyle(.plain)
-            .help("Preview")
-            .accessibilityLabel("Preview \(row.rec.filename)")
+            Button { previewItem = row } label: { thumbnail(row) }
+                .buttonStyle(.plain)
+                .help("Preview")
+                .accessibilityLabel("Preview \(row.rec.filename)")
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.rec.filename).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(row.rec.filename).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
                     .lineLimit(1).truncationMode(.middle)
-                Text(rowDetail(row))
-                    .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).lineLimit(1)
+                Text(rowDetail(row)).font(.system(size: 12)).foregroundStyle(Theme.ink3).lineLimit(1)
             }
             .layoutPriority(1)
-            Spacer(minLength: 4)
+            Spacer(minLength: 6)
             if let part, selectedRows.count > 1 {
-                Pill(text: "Part \(part)", tone: row.addedByUser ? .sage : .neutral).fixedSize()
+                Pill(text: "Part \(part + 1)", tone: Self.partTones[part % Self.partTones.count]).fixedSize()
             }
             if row.addedByUser {
                 Button { removeRecording(row) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
@@ -356,96 +343,74 @@ struct ConfirmationScreen: View {
                     .help("Remove this recording").accessibilityLabel("Remove \(row.rec.filename)")
             }
         }
-        .padding(9)
-        .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(row.addedByUser ? Theme.sageTint.opacity(0.5) : Theme.raised.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(row.addedByUser ? Theme.sage.opacity(0.6) : Theme.line2))
-        .opacity(included ? 1 : 0.55)
+        .padding(.vertical, 12)
+        .opacity(included ? 1 : 0.5)
+        .contentShape(Rectangle())
     }
 
-    var addRecordingZone: some View {
-        Button { addRecordings(chooseRecordings()) } label: {
+    func thumbnail(_ row: RecordingRow) -> some View {
+        ZStack {
+            if let t = row.thumbnail { Image(nsImage: t).resizable().aspectRatio(contentMode: .fill) }
+            else { HillsArt(sun: row.addedByUser).opacity(0.75) }
+            Image(systemName: "play.fill").font(.system(size: 10)).foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.3), radius: 3)
+            if let d = row.rec.durationSeconds {
+                Text(CoreFormat.duration(Int(d)))
+                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.45)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(3)
+            }
+        }
+        .frame(width: 62, height: 40)
+        .background(Color(nsColor: NSColor(hex: 0x2B2E2B)))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .shadow(color: .black.opacity(0.08), radius: 3, y: 2)
+    }
+
+    /// Quiet "+" line that adds something (and lights up while a drop is over its section).
+    func addLine(_ text: String, tone: Theme.Tone, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: recordingDropTargeted ? "play.rectangle" : "plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.sageInk)
-                    .frame(width: 28, height: 28)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(recordingDropTargeted ? Theme.raised : Theme.sageTint))
-                if recordingDropTargeted {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Release to add as Part \(selectedRows.count + 1)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.forest)
-                        Text("Read from where it is. Nothing is moved.").font(.system(size: 11.5)).foregroundStyle(Theme.ink2)
-                    }
-                } else {
-                    addRecordingLabel.font(.system(size: 12.5))
-                }
-                Spacer()
-                if !recordingDropTargeted { Text("MP4 · M4A").font(.system(size: 11)).foregroundStyle(Theme.ink3) }
+                Image(systemName: active ? "arrow.down" : "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tone.ink)
+                    .frame(width: 26, height: 26)
+                    .overlay(Circle().strokeBorder(tone.ink.opacity(0.6), style: StrokeStyle(lineWidth: 1.4, dash: active ? [] : [3, 3])))
+                Text(text).font(.system(size: 13, weight: active ? .semibold : .regular)).foregroundStyle(active ? tone.ink : Theme.ink2)
             }
-            .padding(.horizontal, 12).padding(.vertical, recordingDropTargeted ? 14 : 9)
-            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(recordingDropTargeted ? Theme.sageTint : Color.clear))
-            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .strokeBorder(recordingDropTargeted ? Theme.forest : Theme.sage.opacity(0.7),
-                              style: dropStroke(recordingDropTargeted)))
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Add a recording")
-    }
-
-    /// Dashed outline for a drop zone; solid while something is dragged over it.
-    func dropStroke(_ active: Bool) -> StrokeStyle {
-        let dash: [CGFloat] = active ? [] : [6, 5]
-        return StrokeStyle(lineWidth: 1.5, dash: dash)
-    }
-
-    var addRecordingLabel: Text {
-        let a: Text = Text("Add a recording").fontWeight(.semibold).foregroundColor(Theme.ink)
-        let b: Text = Text(" · drop an MP4 here, or ").foregroundColor(Theme.ink2)
-        let c: Text = Text("choose…").underline().foregroundColor(Theme.ink2)
-        return a + b + c
-    }
-
-    func modeCard(_ m: ProcessingMode, title: String, detail: String) -> some View {
-        let on = mode == m
-        return Button { withAnimation(Theme.spring) { mode = m } } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Circle().strokeBorder(on ? Theme.forest : Theme.ink3, lineWidth: on ? 5 : 1.5).frame(width: 16, height: 16)
-                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
-                }
-                Text(detail).font(.system(size: 11.5)).foregroundStyle(Theme.ink2)
-            }
-            .padding(.horizontal, 13).padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(on ? Theme.sageTint.opacity(0.6) : Theme.raised.opacity(0.6)))
-            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(on ? Theme.forest : Theme.line, lineWidth: 1.5))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     // MARK: Lesson files
 
-    var filesCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 11) {
-                IconBadge(systemName: "paperclip", tone: .sage, size: 36)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Lesson files").font(Theme.serif(20)).foregroundStyle(Theme.ink)
-                    Text("Optional · slides, pupil work, your model answers").font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
-                }
+    var filesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                sectionHeader("Lesson files", icon: "paperclip", tone: .lavender)
                 Spacer()
-                if !files.isEmpty { Pill(text: "\(files.count) added", tone: .sage).transition(.scale.combined(with: .opacity)) }
+                Text("Optional").font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
+            .padding(.bottom, 6)
             if files.isEmpty {
-                bigDropZone
+                emptyFiles.padding(.top, 8)
             } else {
                 ForEach($files) { $f in
-                    FileCard(file: $f) { withAnimation(Theme.spring) { files.removeAll { $0.id == f.id } } }
-                        .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity.combined(with: .scale(scale: 0.95))))
+                    VStack(spacing: 0) {
+                        FileRow(file: $f) { withAnimation(Theme.spring) { files.removeAll { $0.id == f.id } } }
+                        Divider().overlay(Theme.line2)
+                    }
+                    .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                 }
-                if files.count < LibraryStore.maxStoredFiles { smallDropZone }
+                if files.count < LibraryStore.maxStoredFiles {
+                    addLine(filesDropTargeted ? "Release to add" : "Add files — or drop them here", tone: .lavender, active: filesDropTargeted) {
+                        withAnimation(Theme.spring) { addFiles(AttachmentPicker.choose()) }
+                    }
+                }
             }
             if let fileError {
                 Label(fileError, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(Theme.clayInk)
@@ -454,8 +419,9 @@ struct ConfirmationScreen: View {
                 Text("With separate processing, the files are added to every part.").font(.system(size: 11)).foregroundStyle(Theme.ink3)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(padding: 18)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.lavender.opacity(filesDropTargeted ? 0.6 : 0)))
+        .padding(-12)
         .onDrop(of: [UTType.fileURL], isTargeted: $filesDropTargeted.animation(Theme.spring)) { providers in
             loadURLs(providers) { urls in
                 // Recordings dropped here go to the recordings list instead.
@@ -469,72 +435,36 @@ struct ConfirmationScreen: View {
         .animation(Theme.spring, value: files.map(\.id))
     }
 
-    var bigDropZone: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 26, weight: .regular))
-                .foregroundStyle(Theme.sageInk)
-                .frame(width: 64, height: 64)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(filesDropTargeted ? Theme.raised : Theme.sageTint))
+    var emptyFiles: some View {
+        VStack(spacing: 10) {
+            Image(systemName: filesDropTargeted ? "arrow.down" : "doc.on.doc")
+                .font(.system(size: 20)).foregroundStyle(Theme.lavInk)
+                .frame(width: 48, height: 48)
+                .background(Circle().fill(Theme.lavender))
                 .scaleEffect(filesDropTargeted ? 1.08 : 1)
-            VStack(spacing: 6) {
-                Text(filesDropTargeted ? "Release to add" : "Drop lesson files here").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                Text(filesDropTargeted ? "They’ll be copied into the app — your originals aren’t changed."
-                                       : "OpenAI uses them to write better notes, and the pupil can download them once you approve the lesson.")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink2).multilineTextAlignment(.center).frame(maxWidth: 330)
-            }
-            if !filesDropTargeted {
-                Button { withAnimation(Theme.spring) { addFiles(AttachmentPicker.choose()) } } label: {
-                    Label("Choose files…", systemImage: "plus")
-                }
-                .buttonStyle(.soft)
-                HStack(spacing: 6) {
-                    ForEach(["PDF", "Word", "PowerPoint", "Excel", "Images", "Text"], id: \.self) {
-                        Text($0).font(.system(size: 10.5, weight: .medium)).foregroundStyle(Theme.ink3)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.line2))
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .padding(.vertical, 24).padding(.horizontal, 20)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(filesDropTargeted ? Theme.sageTint : Theme.raised.opacity(0.35)))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .strokeBorder(filesDropTargeted ? Theme.forest : Theme.sage.opacity(0.7),
-                          style: dropStroke(filesDropTargeted)))
-    }
-
-    var smallDropZone: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "square.and.arrow.up").font(.system(size: 15)).foregroundStyle(Theme.sageInk)
-                .frame(width: 38, height: 38)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
-            Text(filesDropTargeted ? "Release to add" : "Drop more files here").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.ink)
-            Spacer()
-            Button { withAnimation(Theme.spring) { addFiles(AttachmentPicker.choose()) } } label: { Label("Choose…", systemImage: "plus") }
+            Text(filesDropTargeted ? "Release to add" : "Drop slides, pupil work or model answers here")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
+            Text("The AI uses them for better notes; the pupil can download them once you approve.")
+                .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).multilineTextAlignment(.center).frame(maxWidth: 300)
+            Button { withAnimation(Theme.spring) { addFiles(AttachmentPicker.choose()) } } label: { Label("Choose files…", systemImage: "plus") }
                 .buttonStyle(.softCompact)
+                .padding(.top, 2)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(filesDropTargeted ? Theme.sageTint : Color.clear))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(filesDropTargeted ? Theme.forest : Theme.sage.opacity(0.7), style: dropStroke(filesDropTargeted)))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 22).padding(.horizontal, 16)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.lavender.opacity(0.25)))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(Theme.lavInk.opacity(0.35), style: StrokeStyle(lineWidth: 1.4, dash: [6, 5])))
     }
 
     // MARK: Action bar
 
     var actionBar: some View {
-        HStack(spacing: 14) {
-            AppLogo(size: 36)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(summaryTitle).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
-                HStack(spacing: 6) {
-                    Pill(text: recordingSummary, tone: selectedRows.count > 1 && mode == nil ? .sand : .neutral).fixedSize()
-                    Pill(text: fileSummary, tone: files.isEmpty ? .neutral : .sage).fixedSize()
-                }
-            }
+        HStack(spacing: 12) {
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(Theme.clayInk).lineLimit(2)
+            } else {
+                Text(summaryLine).font(.system(size: 13)).foregroundStyle(confirmHint == nil ? Theme.ink2 : Theme.sandInk).lineLimit(1)
             }
             Spacer()
             if working {
@@ -556,37 +486,28 @@ struct ConfirmationScreen: View {
             .disabled(!canConfirm || working)
             .help(confirmHint ?? "")
         }
-        .padding(.horizontal, 26).padding(.vertical, 14)
-        .background(Theme.surface.opacity(0.92))
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .padding(.horizontal, 34).padding(.vertical, 16)
+        .background(LinearGradient(colors: [Theme.sand.opacity(0.45), Theme.bg], startPoint: .leading, endPoint: .trailing))
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line2).frame(height: 1) }
     }
 
-    var summaryTitle: String {
-        var parts = [pupilName ?? "Choose a pupil", lessonDate.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))]
-        if hasStartTime { parts.append(startTime.formatted(date: .omitted, time: .shortened)) }
-        return parts.joined(separator: " · ")
-    }
-
-    var recordingSummary: String {
+    var summaryLine: String {
+        if let hint = confirmHint { return hint }
         let n = selectedRows.count
-        var s = "\(n) recording\(n == 1 ? "" : "s")"
-        if n > 1 { s += mode == .combined ? " · combined" : (mode == .separate ? " · separate" : " · choose how") }
+        let how: String = mode == .separate ? "kept separate" : "combined"
+        var s: String = "1 recording"
+        if n != 1 { s = "\(n) recordings " + how }
         let total = selectedRows.compactMap(\.rec.durationSeconds).reduce(0, +)
         if total > 0 { s += " · \(Int((total / 60).rounded())) min" }
+        s += files.isEmpty ? " · no files" : " · \(files.count) file\(files.count == 1 ? "" : "s")"
         return s
-    }
-
-    var fileSummary: String {
-        guard !files.isEmpty else { return "No files" }
-        let shared = files.filter(\.shareWithPupil).count
-        return "\(files.count) file\(files.count == 1 ? "" : "s") · \(shared) for the pupil"
     }
 
     var confirmHint: String? {
         if studentId.isEmpty { return "Choose the pupil first" }
         if selection.isEmpty { return "Include at least one recording" }
-        if effectiveMode == nil { return "Choose whether to combine the recordings or keep them separate" }
-        if session.inferredDate.needsReview && !dateChecked { return "Tick “I have checked the date”" }
+        if effectiveMode == nil { return "Choose Combine or Separate for the recordings" }
+        if session.inferredDate.needsReview && !dateChecked { return "Tick “I've checked the date”" }
         return nil
     }
 
@@ -822,8 +743,44 @@ struct RecordingReorderDelegate: DropDelegate {
     }
 }
 
-/// One lesson file on the Confirm screen: what it is, and who gets it.
-struct FileCard: View {
+/// Combine / Separate, as a small sliding switch beside the Recordings heading.
+struct ModeSwitch: View {
+    @Binding var mode: ProcessingMode?
+    @Namespace private var space
+
+    var body: some View {
+        HStack(spacing: 0) {
+            option(.combined, "Combine")
+            option(.separate, "Separate")
+        }
+        .padding(3)
+        .background(Capsule().fill(Theme.line2))
+    }
+
+    func option(_ m: ProcessingMode, _ title: String) -> some View {
+        let on = mode == m
+        return Button { withAnimation(Theme.spring) { mode = m } } label: {
+            Text(title)
+                .font(.system(size: 12, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? Theme.ink : Theme.ink2)
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background {
+                    if on {
+                        Capsule().fill(Theme.raised)
+                            .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                            .matchedGeometryEffect(id: "mode", in: space)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(m == .combined ? "One set of notes and one joined video" : "A note and a video for each recording")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// One lesson file: what it is, and who gets it — no box, just a calm row.
+struct FileRow: View {
     @Binding var file: PendingAttachment
     var onRemove: () -> Void
 
@@ -839,47 +796,42 @@ struct FileCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 13) {
                 Text(ext.isEmpty ? "FILE" : String(ext.prefix(4)))
-                    .font(.system(size: 9.5, weight: .bold)).foregroundStyle(tone.ink)
-                    .frame(width: 40, height: 46)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tone.fill))
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(tone.ink)
+                    .frame(width: 34, height: 40)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tone.fill))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(file.filename).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Text(file.filename).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
                         .lineLimit(1).truncationMode(.middle).help(file.filename)
-                    Text(Int64(file.byteCount).formatted(.byteCount(style: .file))).font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
+                    Text(Int64(file.byteCount).formatted(.byteCount(style: .file))).font(.system(size: 12)).foregroundStyle(Theme.ink3)
                 }
+                .layoutPriority(1)
                 Spacer(minLength: 4)
                 Button(action: onRemove) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
                     .buttonStyle(.plain).foregroundStyle(Theme.ink3)
                     .help("Remove this file").accessibilityLabel("Remove \(file.filename)")
             }
-            Text("What is it?").font(.system(size: 11)).foregroundStyle(Theme.ink3).padding(.top, 10).padding(.bottom, 6)
-            RoleSegments(role: $file.role)
-                .disabled(!file.includeInContext)
-                .opacity(file.includeInContext ? 1 : 0.5)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { useToggles }
-                VStack(spacing: 6) { useToggles }
+            FlowPills(spacing: 14) {
+                RoleMenu(role: $file.role)
+                    .disabled(!file.includeInContext)
+                    .opacity(file.includeInContext ? 1 : 0.5)
+                    .help("What this file is, so the AI uses it properly")
+                SmallSwitch(isOn: $file.includeInContext, title: "AI reads it")
+                    .help("Off: OpenAI never sees this file")
+                SmallSwitch(isOn: $file.shareWithPupil, title: "Pupil gets it")
+                    .help("Off: the file stays on this Mac and is not uploaded to LetsMeet")
             }
-            .padding(.top, 10)
+            .padding(.leading, 47)
             if let note = statusNote {
-                Text(note).font(.system(size: 11)).foregroundStyle(Theme.ink3).padding(.top, 7)
+                Text(note).font(.system(size: 11)).foregroundStyle(Theme.ink3).padding(.leading, 47)
                     .transition(.opacity)
             }
         }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.raised.opacity(0.7)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.line2))
-        .hoverLift()
+        .padding(.vertical, 14)
         .animation(Theme.spring, value: file.includeInContext)
         .animation(Theme.spring, value: file.shareWithPupil)
-    }
-
-    @ViewBuilder var useToggles: some View {
-        UseToggle(isOn: $file.includeInContext, title: "AI reads it", detail: "for the notes")
-        UseToggle(isOn: $file.shareWithPupil, title: "Pupil gets it", detail: "as a download")
     }
 
     var statusNote: String? {
@@ -892,10 +844,9 @@ struct FileCard: View {
     }
 }
 
-/// Full-width segmented choice of what a file is, with a sliding selection.
-struct RoleSegments: View {
+/// "Slides ⌄" — a colour-coded pill that opens the list of roles.
+struct RoleMenu: View {
     @Binding var role: AttachmentRole
-    @Namespace private var space
 
     static func shortLabel(_ r: AttachmentRole) -> String {
         switch r {
@@ -906,66 +857,53 @@ struct RoleSegments: View {
         }
     }
 
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(AttachmentRole.allCases) { r in
-                let on = r == role
-                Button { withAnimation(Theme.spring) { role = r } } label: {
-                    Text(Self.shortLabel(r)).lineLimit(1).minimumScaleFactor(0.8)
-                    .font(.system(size: 12, weight: on ? .semibold : .regular))
-                    .foregroundStyle(on ? Theme.onForest : Theme.ink2)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .background {
-                        if on {
-                            Capsule().fill(Theme.forest).matchedGeometryEffect(id: "role", in: space)
-                        }
-                    }
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .help(r.label)
-                .accessibilityAddTraits(on ? .isSelected : [])
-            }
+    static func tone(_ r: AttachmentRole) -> Theme.Tone {
+        switch r {
+        case .slides: return .sage
+        case .studentWork: return .lavender
+        case .exemplar: return .sand
+        case .other: return .neutral
         }
-        .padding(3)
-        .background(Capsule().fill(Theme.line2))
+    }
+
+    var body: some View {
+        let tone = Self.tone(role)
+        Menu {
+            ForEach(AttachmentRole.allCases) { r in
+                Button(r.label) { withAnimation(Theme.spring) { role = r } }
+            }
+        } label: {
+            Text(Self.shortLabel(role))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .font(.system(size: 12.5, weight: .semibold))
+        .foregroundStyle(tone.ink)
+        .tint(tone.ink)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Capsule().fill(tone.fill))
     }
 }
 
-/// A large on/off pill: switch, bold title, quiet detail.
-struct UseToggle: View {
+/// A small switch with a label beside it.
+struct SmallSwitch: View {
     @Binding var isOn: Bool
     var title: String
-    var detail: String
     var body: some View {
         Button { withAnimation(Theme.spring) { isOn.toggle() } } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ZStack(alignment: isOn ? .trailing : .leading) {
-                    Capsule().fill(isOn ? Theme.sageInk : Theme.ink3.opacity(0.45)).frame(width: 30, height: 18)
-                    Circle().fill(.white).frame(width: 14, height: 14).padding(2)
+                    Capsule().fill(isOn ? Theme.sage : Theme.ink3.opacity(0.35)).frame(width: 27, height: 16)
+                    Circle().fill(.white).frame(width: 12, height: 12).padding(2)
                         .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
-                    Text(detail).font(.system(size: 11)).foregroundStyle(Theme.ink2)
-                }
-                .fixedSize()
-                Spacer(minLength: 0)
+                Text(title).font(.system(size: 12.5)).foregroundStyle(isOn ? Theme.ink : Theme.ink3)
             }
-            .padding(.horizontal, 9).padding(.vertical, 7)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isOn ? Theme.sageTint : Theme.line2.opacity(0.6)))
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(title) \(detail)")
+        .accessibilityLabel(title)
         .accessibilityValue(isOn ? "On" : "Off")
-    }
-
-    var label: Text {
-        let a: Text = Text(title).fontWeight(.semibold).foregroundColor(Theme.ink)
-        let b: Text = Text(" · " + detail).foregroundColor(Theme.ink2)
-        return a + b
     }
 }
